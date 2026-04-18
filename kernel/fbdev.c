@@ -70,8 +70,8 @@ static u64 fb_detect_lfb_phys(void) {
 #define FB_MAX_WIDTH  1920
 #define FB_MAX_HEIGHT 1080
 
-static int  fb_width  = 1024;   /* current width  */
-static int  fb_height = 768;    /* current height */
+static int  fb_width  = 1920;   /* current width  */
+static int  fb_height = 1080;   /* current height */
 #define FB_WIDTH   fb_width
 #define FB_HEIGHT  fb_height
 
@@ -168,6 +168,14 @@ void fb_disable(void) {
 int fb_is_enabled(void) { return fb_enabled; }
 
 /* ── Drawing primitives ──────────────────────────────────────── */
+
+/* Internal alpha blend: alpha=0 → dst unchanged, alpha=255 → src */
+static u32 fb_blend(u32 dst, u32 src, int alpha){
+    int sr=(src>>16)&0xff,sg=(src>>8)&0xff,sb=src&0xff;
+    int dr=(dst>>16)&0xff,dg=(dst>>8)&0xff,db=dst&0xff;
+    int r=dr+((sr-dr)*alpha>>8),g=dg+((sg-dg)*alpha>>8),b=db+((sb-db)*alpha>>8);
+    return(u32)((r<<16)|(g<<8)|b);
+}
 
 /* Set a single pixel (x, y) to color (0xAARRGGBB) */
 void fb_put_pixel(int x, int y, u32 color) {
@@ -318,30 +326,70 @@ void fb_draw_line(int x0, int y0, int x1, int y1, u32 color) {
 /* Draw a rounded rectangle (simple: rectangle with 2-pixel corners) */
 void fb_draw_rounded_rect(int x, int y, int w, int h, u32 color) {
     if (!fb_enabled) return;
-    /* Top/bottom edges (inset 2px from corners) */
-    fb_draw_hline(x + 2, y, w - 4, color);
-    fb_draw_hline(x + 2, y + h - 1, w - 4, color);
-    /* Left/right edges (inset 2px from corners) */
-    fb_draw_vline(x, y + 2, h - 4, color);
-    fb_draw_vline(x + w - 1, y + 2, h - 4, color);
-    /* Corner pixels */
-    fb_put_pixel(x + 1, y + 1, color);
-    fb_put_pixel(x + w - 2, y + 1, color);
-    fb_put_pixel(x + 1, y + h - 2, color);
-    fb_put_pixel(x + w - 2, y + h - 2, color);
+    int r = 4; /* 4px radius for smooth modern corners */
+    if (w < r*2+2) r = w/2-1;
+    if (h < r*2+2) r = h/2-1;
+    if (r < 1) r = 1;
+    /* Straight edges */
+    fb_draw_hline(x + r, y,         w - r*2, color);
+    fb_draw_hline(x + r, y + h - 1, w - r*2, color);
+    fb_draw_vline(x,         y + r, h - r*2, color);
+    fb_draw_vline(x + w - 1, y + r, h - r*2, color);
+    /* Anti-aliased arc for each corner using precomputed coverage */
+    for (int i = 0; i < r; i++) {
+        /* distance from corner centre to pixel edge, normalised to alpha */
+        int cr = r - i;
+        int aa_outer = 255 - (cr * 255 / r);
+        int aa_inner = cr * 200 / r;
+        /* top-left */
+        fb_put_pixel(x + i,         y + r - i - 1, fb_blend(fb_get_pixel(x+i, y+r-i-1), color, aa_outer));
+        fb_put_pixel(x + r - i - 1, y + i,         fb_blend(fb_get_pixel(x+r-i-1, y+i), color, aa_inner));
+        /* top-right */
+        fb_put_pixel(x+w-1-i,       y + r - i - 1, fb_blend(fb_get_pixel(x+w-1-i, y+r-i-1), color, aa_outer));
+        fb_put_pixel(x+w-r+i,       y + i,         fb_blend(fb_get_pixel(x+w-r+i, y+i), color, aa_inner));
+        /* bottom-left */
+        fb_put_pixel(x + i,         y+h-r+i,       fb_blend(fb_get_pixel(x+i, y+h-r+i), color, aa_outer));
+        fb_put_pixel(x + r - i - 1, y+h-1-i,       fb_blend(fb_get_pixel(x+r-i-1, y+h-1-i), color, aa_inner));
+        /* bottom-right */
+        fb_put_pixel(x+w-1-i,       y+h-r+i,       fb_blend(fb_get_pixel(x+w-1-i, y+h-r+i), color, aa_outer));
+        fb_put_pixel(x+w-r+i,       y+h-1-i,       fb_blend(fb_get_pixel(x+w-r+i, y+h-1-i), color, aa_inner));
+    }
 }
 
-/* Fill a rounded rectangle */
+/* Fill a rounded rectangle with smooth 4px-radius corners */
 void fb_fill_rounded_rect(int x, int y, int w, int h, u32 color) {
     if (!fb_enabled) return;
-    /* Main body */
-    fb_fill_rect(x + 1, y, w - 2, h, color);
-    fb_fill_rect(x, y + 1, w, h - 2, color);
-    /* Corners */
-    fb_put_pixel(x + 1, y + 1, color);
-    fb_put_pixel(x + w - 2, y + 1, color);
-    fb_put_pixel(x + 1, y + h - 2, color);
-    fb_put_pixel(x + w - 2, y + h - 2, color);
+    int r = 4;
+    if (w < r*2+2) r = w/2-1;
+    if (h < r*2+2) r = h/2-1;
+    if (r < 1) r = 1;
+    /* Fill body in three horizontal bands */
+    fb_fill_rect(x,     y + r, w, h - r*2, color); /* middle band   */
+    fb_fill_rect(x + r, y,     w - r*2, r, color); /* top cap       */
+    fb_fill_rect(x + r, y+h-r, w - r*2, r, color); /* bottom cap    */
+    /* Fill corner arcs — midpoint circle fill per row */
+    for (int dy = 0; dy < r; dy++) {
+        /* compute filled width at this row using circle equation: x = sqrt(r^2 - dy^2) */
+        int fy = r - dy; /* distance from centre row */
+        int fx = 0;
+        /* integer sqrt via iteration */
+        while ((fx+1)*(fx+1) + fy*fy <= r*r) fx++;
+        int row_x = r - fx;
+        /* top corners */
+        fb_fill_rect(x + row_x, y + dy, w - row_x*2, 1, color);
+        /* bottom corners */
+        fb_fill_rect(x + row_x, y+h-1-dy, w - row_x*2, 1, color);
+        /* anti-alias the corner edge pixel */
+        int aa = fx * 180 / r;
+        u32 tl_bg = fb_get_pixel(x+row_x-1, y+dy);
+        u32 tr_bg = fb_get_pixel(x+w-row_x, y+dy);
+        u32 bl_bg = fb_get_pixel(x+row_x-1, y+h-1-dy);
+        u32 br_bg = fb_get_pixel(x+w-row_x, y+h-1-dy);
+        fb_put_pixel(x+row_x-1,  y+dy,      fb_blend(tl_bg, color, aa));
+        fb_put_pixel(x+w-row_x,  y+dy,      fb_blend(tr_bg, color, aa));
+        fb_put_pixel(x+row_x-1,  y+h-1-dy,  fb_blend(bl_bg, color, aa));
+        fb_put_pixel(x+w-row_x,  y+h-1-dy,  fb_blend(br_bg, color, aa));
+    }
 }
 
 /* Draw a circle outline (midpoint algorithm) */

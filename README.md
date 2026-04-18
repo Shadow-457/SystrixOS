@@ -1,188 +1,190 @@
 # ENGINE OS
 
-> A 64-bit operating system built from scratch in C and x86-64 Assembly.
+> UGH. ME MAKE BIG ROCK THINK. 64-BIT. ME WRITE IN C AND MAGIC SQUIGGLES (x86-64 ASSEMBLY).
 
-ENGINE is a hobby OS that boots on bare metal (and QEMU), featuring a custom bootloader, preemptive multitasking kernel, virtual memory, FAT32 filesystem, ELF binary loader, PS/2 drivers, and a full framebuffer GUI desktop environment — all written from the ground up.
-
----
-
-## Features
-
-**Boot & Kernel**
-- Custom 512-byte BIOS bootloader — handles real mode → protected mode → long mode transition manually, with hand-rolled GDT/IDT setup
-- Preemptive round-robin scheduler with full process control blocks (PCBs)
-- Physical memory manager (PMM) using a bitmap allocator
-- Virtual memory manager (VMM) with per-process page tables and isolated address spaces
-- Custom heap allocator (`malloc`/`free`) living at 0x200000
-
-**Userland**
-- ELF64 binary loader — loads and executes 64-bit ELF programs
-- Minimal `libc` + `crt0` written from scratch for user programs
-- `syscall` interface (`write`, `exit`, etc.) via the `syscall` instruction
-- Shadow Compiler (`SHC`) — compiles `.shadow` source files from within the OS
-
-**Drivers & I/O**
-- PS/2 keyboard and mouse — both polled and interrupt-driven
-- ATA PIO hard disk driver (read/write)
-- VGA text mode terminal — 80×25 with 200-row scrollback buffer (Shift+PgUp/PgDn)
-- Framebuffer driver — 1024×768 @ 32bpp
-- Intel e1000 NIC driver (basic, MAC hardcoded to `52:54:00:12:34:56`)
-
-**Filesystem**
-- FAT32 filesystem mounted at LBA 256 — read/write file support
-
-**GUI Desktop Environment**
-- Full windowed desktop at 1024×768
-- Window management — drag, 8-direction resize, minimize/maximize/close (macOS-style traffic lights)
-- Application launcher (top-left Menu button)
-- System tray — clock, volume, and network indicators (top-right)
-- Desktop icons — double-click to launch apps
-- Right-click context menu on desktop
-- Bottom pill-style dock with active app indicators
-- System monitor — CPU, memory, and disk usage with progress bars
-- Color scheme: deep navy `#0a0e1a` with cyan `#00e5ff` and violet `#7c3aed` accents
+ENGINE is cave-tribe hobby rock-brain. It wake up on real rock (and fake rock called QEMU). It have own wake-up magic, it juggle many tasks at once, it remember where things go, it find food in FAT32 cave, it load ELF creature, it poke PS/2 rock-stick, and it make pretty picture cave wall. ME WRITE ALL OF IT. NO STEAL FROM OTHER CAVE.
 
 ---
 
-## Project Structure
+## WHAT ENGINE CAN DO
+
+**Wake Up & Brain Rock**
+- Me make tiny 512-rock wake-up spell — it drag brain from dumb-mode to smarter-mode to BIGGEST-mode by hand. Me carve GDT/IDT runes myself
+- Brain run many tasks in circle. No task hog brain. Each get turn. Fair like sharing mammoth
+- Rock-remember manager (PMM) — use picture-map to track which rocks free, which rocks taken
+- Magic address manager (VMM) — each creature get own pretend-rocks so they no fight
+- Me also make own `malloc`/`free` — it live at rock-address 0x200000
+
+**Outside World (Userland)**
+- ELF64 creature-loader — pick up 64-bit ELF animal and make it run
+- Tiny `libc` + `crt0` — me write from scratch so creature have place to stand
+- Talk-to-brain hole (`syscall`) — creature poke brain with `write`, `exit`, grunt-words
+- Shadow Compiler (`SHC`) — can turn `.shadow` scrolls into running creatures INSIDE ENGINE ITSELF. OOGH.
+
+**Rock-Pokers & Ear-Holes**
+- PS/2 rock-poker (keyboard) and tail-pointer (mouse) — both poke and interrupt style
+- ATA rock-scratching driver — read and write marks on spinning rock
+- VGA word-cave — 80x25 letters, scroll back 200 rows with Shift+PgUp/PgDn
+- Picture-wall driver — 1024x768 with 32 colors-per-dot
+- Intel e1000 wire-talk driver (basic, ear-address stuck at `52:54:00:12:34:56`)
+
+**Food Storage Cave**
+- FAT32 cave at LBA 256 — can store and find food (files). Read AND write. UGH YES.
+
+**Pretty Picture Cave Wall (GUI Desktop)**
+- Full cave-drawing at 1024x768
+- Move caves around — drag, stretch 8 ways, hide/grow/kill (like apple-tribe buttons)
+- Push big button top-left to open more caves
+- Top-right shows: sun-count (clock), loud-rock (volume), wire-talk (network)
+- Cave-wall has clickable pictures — poke twice to open
+- Poke right-hand finger on wall for secret menu
+- Bottom has round rock-shelf with dots showing open caves
+- Brain-watcher cave shows: how tired brain is, how full memory rock, how full disk rock
+- Colors: dark water blue `#0a0e1a` with bright sky `#00e5ff` and magic purple `#7c3aed`
+
+---
+
+## CAVE MAP (Project Structure)
 
 ```
 ENGINE/
 ├── boot/
-│   └── boot.S          # 16-bit bootloader (real → protected → long mode)
+│   └── boot.S          # 16-bit wake-up spell (dumb-mode → smarter-mode → biggest-mode)
 ├── kernel/
-│   ├── entry.S         # kernel entry point, stack setup
-│   ├── isr.S           # interrupt handlers + syscall stub
-│   ├── kernel.c        # core kernel (VGA, PS/2, ATA, FAT32, shell, GUI event loop)
-│   ├── heap.c          # malloc/free
-│   ├── pmm.c           # physical memory manager
-│   ├── vmm.c           # virtual memory manager + page tables
-│   ├── tss.c           # task state segment
-│   ├── process.c       # process management (PCBs, fork, exec)
-│   ├── elf.c           # ELF64 loader
-│   ├── scheduler.c     # round-robin preemptive scheduler
-│   ├── syscall.c       # syscall handler
-│   ├── input.c         # keyboard input
-│   ├── net.c           # e1000 NIC driver
-│   ├── fbdev.c         # framebuffer driver
-│   └── gui.c           # full desktop environment
+│   ├── entry.S         # brain wake-up spot, stack pile setup
+│   ├── isr.S           # interrupt catchers + syscall hole
+│   ├── kernel.c        # big brain heart (VGA, PS/2, ATA, FAT32, shell, cave-drawing loop)
+│   ├── heap.c          # malloc/free (grab rock, give back rock)
+│   ├── pmm.c           # physical rock manager
+│   ├── vmm.c           # pretend-rock manager + address paintings
+│   ├── tss.c           # task rock slab
+│   ├── process.c       # creature management (birth, copy, run)
+│   ├── elf.c           # ELF64 creature-loader
+│   ├── scheduler.c     # round-circle fair-turn picker
+│   ├── syscall.c       # grunt-hole handler
+│   ├── input.c         # rock-poker listener
+│   ├── net.c           # wire-talk driver
+│   ├── fbdev.c         # picture-wall driver
+│   └── gui.c           # full cave drawing environment
 ├── user/
-│   ├── crt0.S          # user program startup
-│   ├── libc.c / libc.h # minimal libc
-│   ├── hello.c         # hello world example
-│   ├── myprogram.c     # example user program
-│   └── shc.c           # Shadow Compiler
+│   ├── crt0.S          # creature birth setup
+│   ├── libc.c / libc.h # tiny creature helper scrolls
+│   ├── hello.c         # "UGGGH HELLO WORLD" example
+│   ├── myprogram.c     # example creature
+│   └── shc.c           # Shadow Compiler creature
 ├── include/
-│   ├── kernel.h        # types and declarations
-│   ├── font8x8.h       # 8x8 bitmap font for framebuffer
-│   └── input.h         # keyboard scancodes
-├── linker.ld           # kernel linker script
+│   ├── kernel.h        # types and grunts
+│   ├── font8x8.h       # 8x8 dot-letter pictures for cave wall
+│   └── input.h         # rock-poker rune-codes
+├── linker.ld           # creature-stitching scroll
 └── Makefile
 ```
 
 ---
 
-## Building
+## HOW TO BUILD FIRE (Building)
 
-**Dependencies:**
-- `gcc` (64-bit target)
-- `binutils` (`as`, `ld`, `objcopy`)
-- `mtools` (FAT32 image manipulation)
-- `qemu-system-x86_64`
-- `make`
-- `python3` (boot sector size validation)
+**Need these rocks first:**
+- `gcc` (64-bit rock-carver)
+- `binutils` (`as`, `ld`, `objcopy` — rock tools)
+- `mtools` (FAT32 cave digger)
+- `qemu-system-x86_64` (fake rock machine)
+- `make` (lazy-grunt runner)
+- `python3` (boot rock size checker)
 
-**Build:**
+**MAKE FIRE:**
 ```bash
 make clean
 make all
 ```
 
-This produces `engine.img` — a bootable disk image.
+This make `engine.img` — a rock that can wake up and think.
 
 ---
 
-## Running
+## HOW TO RUN (Running)
 
 ```bash
 make run
 ```
 
-Launches QEMU with the disk image. At the shell prompt inside ENGINE, type `gui` to start the desktop environment.
+Start fake rock (QEMU) with disk-rock. Inside ENGINE shell, grunt `gui` to start cave-drawing.
 
-**Other targets:**
+**Other run-grunts:**
 ```bash
-make run-quiet    # GTK display, less verbose
-make run-sdl      # SDL display backend
-make run-nographic  # serial console only
+make run-quiet      # GTK picture box, less noise
+make run-sdl        # SDL picture box
+make run-nographic  # only wire words, no picture cave
 ```
 
 ---
 
-## User Programs
+## OUTSIDE CREATURES (User Programs)
 
-Example programs live in `user/`. Build and add them to the disk image:
+Example creatures live in `user/` cave. Build and add to rock-picture:
 
 ```bash
-make hello        # builds HELLO_C
-make myprog       # builds MYPROGRAM
-make shc          # builds the Shadow Compiler
-make programs     # adds HELLO_C + MYPROGRAM to disk
-make compiler     # adds SHC + sample .shadow files
+make hello        # carve HELLO_C creature
+make myprog       # carve MYPROGRAM creature
+make shc          # carve Shadow Compiler creature
+make programs     # put HELLO_C + MYPROGRAM in rock
+make compiler     # put SHC + shadow-scrolls in rock
 ```
 
-Run them inside ENGINE's shell:
+Run creatures inside ENGINE shell:
 ```
 elf HELLO_C
 elf MYPROGRAM
 elf SHC
 ```
 
-To add a custom ELF binary:
+Add own creature to rock:
 ```bash
 make addprog PROG=./MYPROG
 ```
 
 ---
 
-## Memory Layout
+## WHERE THINGS LIVE IN MEMORY CAVE
 
-| Region | Address |
-|---|---|
-| Bootloader | `0x7C00` |
-| Kernel load | physical low memory |
-| Heap | `0x200000` (2 MB base, 2 MB size) |
-| User programs | `0x400000` |
-| Stack | grows down from `0x700000` |
-| Framebuffer | `0xA0000000` (kernel virtual) |
-
----
-
-## Known Limitations
-
-- Max 8 windows open simultaneously (`GUI_MAX_WINDOWS`)
-- Max 128 widgets total (`GUI_MAX_WIDGETS`)
-- No hardware GPU acceleration — all rendering is software into the framebuffer
-- System tray clock displays `00:00:00` (RTC not yet hooked up)
-- Network and volume indicators are visual only
-- FAT32 support is functional but basic
+| Cave Region         | Rock Address                  |
+|---------------------|-------------------------------|
+| Wake-up spell       | `0x7C00`                      |
+| Brain load spot     | low physical rocks            |
+| Heap (grab-rocks)   | `0x200000` (2 MB, 2 MB big)   |
+| Outside creatures   | `0x400000`                    |
+| Stack pile          | grow down from `0x700000`     |
+| Picture-wall        | `0xA0000000` (brain pretend)  |
 
 ---
 
-## Notable Implementation Notes
+## THINGS ENGINE NOT DO GOOD YET (Known Limitations)
 
-**The `-fno-pic` flag is critical.** Without it, GCC emits GOT-indirect relocations. Calling functions through function pointers (e.g. `null_isr`) goes through a non-existent GOT, causing the IDT gates to load raw code bytes as addresses instead — triggering an immediate GPF cascade on the first timer tick. Took a week to track down.
-
-**binutils `.note.gnu.property` injection.** By default, binutils injects a `.note.gnu.property` section into the boot binary, inflating it from 512 bytes to 1064 bytes — causing the BIOS to triple fault. Workaround: link to a temp ELF first, then strip to raw binary with `objcopy`.
-
----
-
-## Why?
-
-To understand how operating systems actually work at the lowest level. Turns out it's a lot of edge cases, magic numbers, and late nights — but extremely satisfying when it all clicks.
+- Only 8 caves open same time (`GUI_MAX_WINDOWS`)
+- Only 128 cave-things total (`GUI_MAX_WIDGETS`)
+- No magic rock GPU — ALL drawing done by hand into picture-wall. SLOW BUT HONEST
+- Sun-count always show `00:00:00` — RTC rock not hooked up yet. TIME IS MYSTERY
+- Wire-talk and loud-rock pictures just look pretty, no real work yet
+- FAT32 cave work but basic. No fancy tricks
 
 ---
 
-## License
+## INTERESTING BATTLE SCARS (Notable Implementation Notes)
 
-GPL-3.0 — see [LICENSE](LICENSE)
+**The `-fno-pic` flag VERY IMPORTANT. ME LEARN HARD WAY.** Without it, GCC make GOT-hole magic. Calling creatures through pointer go through GOT that not exist. IDT gates load raw code-rocks as addresses instead — brain explode on first timer-poke. Took one whole week of sad grunting to find. UGH.
+
+**binutils sneaks in `.note.gnu.property` rock.** By default, binutils stuff extra section into boot binary, make it grow from 512 to 1064 rocks — BIOS brain triple-fall-down. Fix: link to temp ELF first, then strip to raw rock with `objcopy`. SNEAKY BINUTILS. ME ANGRY.
+
+---
+
+## WHY ME DO THIS?
+
+Me want understand how brain-rocks REALLY work at bottom of everything. Turns out: LOTS of edge cases, magic numbers, and very late nights staring at fire. But when it all click...
+
+UGH. FEEL GOOD LIKE FIRST TIME MAKE FIRE.
+
+---
+
+## SHARING RULES (License)
+
+GPL-3.0 — see [LICENSE](LICENSE). Share with tribe. Give credit. No steal and call own.

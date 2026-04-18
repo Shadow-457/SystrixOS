@@ -3,10 +3,10 @@
 
 #define SCR_W        (fb_get_width())
 #define SCR_H        (fb_get_height())
-#define GLYPH_SCALE  2
+#define GLYPH_SCALE  1
 #define GLYPH_W      (8 * GLYPH_SCALE)
 #define GLYPH_H      (8 * GLYPH_SCALE)
-#define MENUBAR_H    30
+#define MENUBAR_H    0
 #define DOCK_H       56
 #define TITLEBAR_H   30
 #define BORDER       3
@@ -175,12 +175,7 @@ static int g_desktop_icon_cnt = 0;
 static ContextMenu g_ctx_menu = {0};
 static AppLauncher g_launcher = {0};
 
-static int g_net_status = 0;
-static int g_volume_level = 75;
 static int g_clock_ticks = 0;
-static int g_clock_sec = 0;
-static int g_clock_min = 0;
-static int g_clock_hour = 0;
 static int g_dirty = 0;           /* 1 = full redraw needed next frame */
 static u64 g_last_drag_redraw = 0;   /* pit_ticks of last drag repaint */
 static int g_desktop_dirty = 1;      /* skip desktop repaint when clean */
@@ -199,10 +194,11 @@ static int g_hover_widget = -1;
 static void draw_app_icon(int ix,int iy,int sz,int icon_type,int active);
 static void draw_window(int id);
 static void draw_dock(void);
+static void draw_desktop(void);
 static void draw_desktop_icons(void);
 static void draw_context_menu(void);
 static void draw_app_launcher(void);
-static void draw_system_tray(void);
+
 static void gui_redraw_window(int id);
 void gui_open_about(void);
 static void gui_redraw_drag(int id);
@@ -318,7 +314,7 @@ void gui_cursor_move(int dx,int dy){
         if(nx+w->w>SCR_W)nx=SCR_W-w->w;
         if(ny+w->h>SCR_H-DOCK_H)ny=SCR_H-DOCK_H-w->h;
         w->x=nx; w->y=ny; w->anim_x=nx; w->anim_y=ny;
-        { u64 now=pit_ticks; if(now-g_last_drag_redraw>=16){g_last_drag_redraw=now;gui_redraw();} }
+        gui_redraw_drag(g_drag_win);
     } else if(g_resizing&&g_resize_win>=0){
         GuiWindow *w=&g_wins[g_resize_win];
         int ndx=g_cur_x-g_resize_start_x, ndy=g_cur_y-g_resize_start_y;
@@ -433,12 +429,47 @@ void gui_handle_click(int px,int py){
                 if(g_launcher.visible){g_launcher.x=4;g_launcher.y=MENUBAR_H+4;g_launcher.w=220;g_launcher.h=g_launcher.count*44+GLYPH_H+20;g_launcher.anim_progress=0;}
                 gui_redraw();return;
             case 1:for(int w=0;w<GUI_MAX_WINDOWS;w++)if(g_wins[w].visible&&g_wins[w].title[0]=='F'){gui_window_set_active(w);gui_redraw();return;}
-                {int fm=gui_window_create(24,48,480,560,"File Manager");if(fm>=0){int rh=GLYPH_H+8,cy=6;gui_widget_add_icon(fm,4,cy,0,1);gui_widget_add_label(fm,44,cy+6,"Files",10);}}
+                {int fm=gui_window_create(24,48,480,560,"File Manager");
+                 if(fm>=0){int rh=GLYPH_H+8,cy=6;
+                    gui_widget_add_icon(fm,4,cy,0,1);gui_widget_add_label(fm,44,cy+6,"Files",10);cy+=rh+4;
+                    gui_widget_add_separator(fm,cy,12);cy+=10;
+                    gui_widget_add_listrow(fm,0,cy,456,"README.TXT","27 B",20);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"HELLO.C","8.2 KB",21);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"MYPROGRAM","64 KB",22);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"SHC","128 KB",23);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"FIB.SHA","512 B",24);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"HELLO.SHA","256 B",25);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"POSIX_TEST","53 KB",26);cy+=rh;
+                    cy+=6;gui_widget_add_separator(fm,cy,27);cy+=10;
+                    gui_widget_add_label_dim(fm,6,cy,"7 items  |  42.6 KB free",28);cy+=rh;
+                    gui_widget_add_button(fm,6,cy,90,GLYPH_H+10,"Refresh",29);
+                    gui_widget_add_button(fm,104,cy,90,GLYPH_H+10,"Delete",30);
+                 }}
                 gui_redraw();return;
             case 2:for(int w=0;w<GUI_MAX_WINDOWS;w++)if(g_wins[w].visible&&g_wins[w].title[0]=='T'){gui_window_set_active(w);g_shell_win_id=w;gui_redraw();return;}
                 gui_open_shell_window();gui_redraw();return;
-            case 3:gui_redraw();return;
-            case 4:gui_redraw();return;
+            case 3:for(int w=0;w<GUI_MAX_WINDOWS;w++)if(g_wins[w].visible&&g_wins[w].title[0]=='S'){gui_window_set_active(w);gui_redraw();return;}
+                {int sid=gui_window_create(200,100,440,460,"Settings");
+                 if(sid>=0){int rh=GLYPH_H+8,cy=8;
+                    gui_widget_add_icon(sid,8,cy,2,300);gui_widget_add_label(sid,48,cy+6,"System Settings",301);cy+=rh+8;
+                    gui_widget_add_separator(sid,cy,302);cy+=10;
+                    gui_widget_add_label(sid,8,cy,"Display Options:",303);cy+=rh+4;
+                    gui_widget_add_checkbox(sid,8,cy,"Enable shadows",1,304);cy+=rh;
+                    gui_widget_add_checkbox(sid,8,cy,"Show grid pattern",1,305);cy+=rh;
+                    gui_widget_add_checkbox(sid,8,cy,"Animate windows",1,306);cy+=rh;
+                    cy+=8;gui_widget_add_separator(sid,cy,307);cy+=10;
+                    gui_widget_add_label(sid,8,cy,"Progress Demo:",308);cy+=rh+4;
+                    gui_widget_add_progress(sid,8,cy,410,75,309);cy+=rh+10;
+                    gui_widget_add_label_dim(sid,8,cy,"System load: 75%",310);cy+=rh+8;
+                    gui_widget_add_separator(sid,cy,311);cy+=10;
+                    gui_widget_add_label(sid,8,cy,"Text Input:",312);cy+=rh+4;
+                    gui_widget_add_textinput(sid,8,cy,410,"Type here...",313);cy+=rh+10;
+                    gui_widget_add_button(sid,8,cy,90,GLYPH_H+10,"Apply",314);
+                    gui_widget_add_button(sid,106,cy,90,GLYPH_H+10,"Reset",315);
+                    gui_widget_add_button(sid,336,cy,90,GLYPH_H+10,"Close",316);
+                 }}
+                gui_redraw();return;
+            case 4:gui_open_about();gui_redraw();return;
             case 5:gui_open_shell_window();gui_redraw();return;
             case 6:gui_open_system_monitor();gui_redraw();return;
             }
@@ -564,23 +595,36 @@ static void gui_redraw_drag(int id){
     if(!g_running||id<0||id>=GUI_MAX_WINDOWS)return;
     cursor_erase();
     GuiWindow *win=&g_wins[id];
+
+    /* Erase previous window position with wallpaper gradient — fast, no full redraw */
     if(g_prev_drag_x>=0){
-        int ex=g_prev_drag_x-SHADOW_OFF-4,ey=g_prev_drag_y-SHADOW_OFF-4;
-        int ew=g_prev_drag_w+SHADOW_OFF*2+8,eh=g_prev_drag_h+SHADOW_OFF*2+8;
-        if(ex<0)ex=0;if(ey<MENUBAR_H)ey=MENUBAR_H;
-        if(ex+ew>SCR_W)ew=SCR_W-ex;if(ey+eh>SCR_H-DOCK_H)eh=SCR_H-DOCK_H-ey;
-        for(int row=ey;row<ey+eh;row++){u32 c=lerp_color(C_WALL_TOP,C_WALL_BOT,row,SCR_H);fb_draw_hline(ex,row,ew,c);}
-        for(int i=0;i<GUI_MAX_WINDOWS;i++){
-            if(i==id||!g_wins[i].visible||g_wins[i].minimized)continue;
-            GuiWindow *ow=&g_wins[i];
-            if(ow->x+ow->w<ex||ow->x>ex+ew)continue;
-            if(ow->y+ow->h<ey||ow->y>ey+eh)continue;
-            draw_window(i);
+        int ex=g_prev_drag_x-SHADOW_OFF-6, ey=g_prev_drag_y-SHADOW_OFF-6;
+        int ew=g_prev_drag_w+SHADOW_OFF*2+12, eh=g_prev_drag_h+SHADOW_OFF*2+12;
+        if(ex<0)ex=0; if(ey<0)ey=0;
+        if(ex+ew>SCR_W)ew=SCR_W-ex; if(ey+eh>SCR_H-DOCK_H)eh=SCR_H-DOCK_H-ey;
+        if(ew>0&&eh>0){
+            /* Repaint wallpaper gradient for each row of dirty region */
+            for(int row=ey;row<ey+eh;row++){
+                u32 c=lerp_color(0x070b11,0x050810,row,SCR_H);
+                fb_draw_hline(ex,row,ew,c);
+            }
+            /* Repaint any other windows that overlap this dirty region */
+            for(int i=0;i<GUI_MAX_WINDOWS;i++){
+                if(i==id||!g_wins[i].visible||g_wins[i].minimized)continue;
+                GuiWindow *ow=&g_wins[i];
+                int ox=ow->anim_x-SHADOW_OFF-2, oy=ow->anim_y-SHADOW_OFF-2;
+                int ow2=ow->anim_w+SHADOW_OFF*2+4, oh2=ow->anim_h+SHADOW_OFF*2+4;
+                if(ox+ow2<ex||ox>ex+ew)continue;
+                if(oy+oh2<ey||oy>ey+eh)continue;
+                draw_window(i);
+            }
         }
     }
-    draw_window(id);draw_dock();
-    g_prev_drag_x=win->x;g_prev_drag_y=win->y;g_prev_drag_w=win->w;g_prev_drag_h=win->h;
-    g_cur_drawn=0;cursor_draw();
+    draw_window(id);
+    draw_dock();
+    g_prev_drag_x=win->x; g_prev_drag_y=win->y;
+    g_prev_drag_w=win->w; g_prev_drag_h=win->h;
+    g_cur_drawn=0; cursor_draw();
 }
 
 void gui_open_shell_window(void){
@@ -680,7 +724,7 @@ void gui_open_about(void){
     gui_widget_add_label(id,8,cy,"Mode:  Ring 0 / Ring 3",204);cy+=row_h;
     gui_widget_add_label(id,8,cy,"FS:    FAT32 + JFS",205);cy+=row_h;
     gui_widget_add_label(id,8,cy,"Net:   e1000 + TCP/IP",206);cy+=row_h;
-    gui_widget_add_label(id,8,cy,"GUI:   1024x768 32bpp VBE",208);cy+=row_h;
+    gui_widget_add_label(id,8,cy,"GUI:   1920x1080 32bpp VBE",208);cy+=row_h;
     cy+=4;gui_widget_add_separator(id,cy,210);cy+=10;
     gui_widget_add_button(id,160,cy,90,GLYPH_H+10,"Close",211);
 }
@@ -1156,34 +1200,6 @@ static void draw_app_launcher(void){
     }
 }
 
-static void draw_system_tray(void){
-    int tray_y=(MENUBAR_H-GLYPH_H)/2;
-    int tray_x=SCR_W-200;
-
-    /* Network */
-    fb_fill_rounded_rect(tray_x,tray_y,18,18,g_net_status?C_NET_ON:C_NET_OFF);
-    if(g_net_status){fb_draw_hline(tray_x+5,tray_y+6,8,C_BASE);fb_draw_hline(tray_x+6,tray_y+9,6,C_BASE);fb_draw_hline(tray_x+7,tray_y+12,4,C_BASE);}
-    else{fb_draw_line(tray_x+5,tray_y+5,tray_x+13,tray_y+13,C_BASE);}
-
-    /* Volume */
-    int vol_x=tray_x+26;
-    u32 vol_color=g_volume_level>60?C_VOL_HIGH:(g_volume_level>30?C_VOL_MED:C_VOL_LOW);
-    fb_fill_rounded_rect(vol_x,tray_y,18,18,vol_color);
-    fb_put_pixel(vol_x+4,tray_y+8,C_BASE);fb_put_pixel(vol_x+5,tray_y+7,C_BASE);fb_put_pixel(vol_x+5,tray_y+9,C_BASE);
-    fb_put_pixel(vol_x+6,tray_y+6,C_BASE);fb_put_pixel(vol_x+6,tray_y+10,C_BASE);
-    fb_fill_rect(vol_x+7,tray_y+6,2,8,C_BASE);
-    if(g_volume_level>30)fb_draw_hline(vol_x+10,tray_y+7,2,C_BASE);
-    if(g_volume_level>60)fb_draw_hline(vol_x+13,tray_y+6,2,C_BASE);
-
-    /* Clock */
-    int clock_x=vol_x+26;
-    char time_str[12];
-    int h=g_clock_hour,m=g_clock_min,s=g_clock_sec;
-    time_str[0]='0'+h/10;time_str[1]='0'+h%10;time_str[2]=':';
-    time_str[3]='0'+m/10;time_str[4]='0'+m%10;time_str[5]=':';
-    time_str[6]='0'+s/10;time_str[7]='0'+s%10;time_str[8]='\0';
-    draw_text(clock_x,tray_y,time_str,C_TEXT_DIM,1,0);
-}
 
 static unsigned int g_star_seed=0x5EED1234;
 static unsigned int star_rand(void){g_star_seed^=g_star_seed<<13;g_star_seed^=g_star_seed>>17;g_star_seed^=g_star_seed<<5;return g_star_seed;}
@@ -1305,30 +1321,6 @@ static void draw_desktop(void){
 
     draw_desktop_icons();
 
-    /* Menu bar */
-    fill_gradient_v(0,0,SCR_W,MENUBAR_H,C_MENUBAR_BG,0x100c06);
-    fb_draw_hline(0,MENUBAR_H-1,SCR_W,C_MENUBAR_SEP);
-    fb_draw_hline(0,MENUBAR_H,SCR_W,blend_color(C_MENUBAR_SEP,0xffffff,8));
-    int my=(MENUBAR_H-GLYPH_H)/2;
-
-    /* Menu button */
-    fb_fill_rounded_rect(4,my-2,44,GLYPH_H+4,blend_color(C_ACCENT,C_BASE,30));
-    fb_draw_rounded_rect(4,my-2,44,GLYPH_H+4,C_ACCENT_DIM);
-    draw_text_c(4,my,44,"Menu",C_ACCENT,1,0);
-
-    /* Logo */
-    int logo_x=54;
-    draw_text(logo_x,my,"ENGINE",C_ACCENT,1,0);
-    int vbx=logo_x+text_w("ENGINE")+10,vbw=text_w("v0.2")+10;
-    fb_fill_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,blend_color(C_ACCENT,C_BASE,30));
-    fb_draw_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,C_ACCENT_DIM);
-    draw_text(vbx+5,my,"v0.2",C_ACCENT,1,0);
-
-    int mmx=vbx+vbw+30;
-    const char*menus[]={"File","Edit","View","Help",0};
-    for(int i=0;menus[i];i++){draw_text(mmx,my,menus[i],C_TEXT_MID,1,0);mmx+=text_w(menus[i])+24;}
-
-    draw_system_tray();
     draw_app_launcher();
     draw_context_menu();
 }
