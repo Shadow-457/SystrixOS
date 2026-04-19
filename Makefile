@@ -61,6 +61,7 @@ KERNEL_C_OBJS = \
     kernel/pipe.o      \
     kernel/signal.o    \
     kernel/fork_exec.o \
+    kernel/futex.o     \
     kernel/security.o  \
     kernel/swap.o      \
     kernel/jfs.o       \
@@ -272,8 +273,8 @@ compiler: engine.img SHC
 clean:
 	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp
 	rm -f boot.bin kernel.bin fat32.img engine.img
-	rm -f user/crt0.o user/hello.o user/myprogram.o user/shc.o user/libc.o user/echo_server.o user/echo_client.o
-	rm -f HELLO_C MYPROGRAM SHC ECHO_SRV ECHO_CLI
+	rm -f user/crt0.o user/hello.o user/myprogram.o user/shc.o user/libc.o user/echo_server.o user/echo_client.o browser/browser.o
+	rm -f HELLO_C MYPROGRAM SHC ECHO_SRV ECHO_CLI BROWSER
 	rm -f qemu.log /tmp/README.TXT
 	rm -f kernel/fbdev.o kernel/gui.o
 
@@ -305,3 +306,41 @@ ipc_demo: engine.img ECHO_SRV ECHO_CLI
 	@echo "    ipc            <- list registered servers"
 
 .PHONY: ipc_demo
+
+# ── Browser ────────────────────────────────────────────────────────
+# Build flags for browser (needs -Ibrowser -Iuser -Iinclude, no SSE)
+BCFLAGS = -m64 -O2 -ffreestanding -fno-stack-protector -mno-red-zone \
+          -fno-pic -nostdlib -nostdinc \
+          -Ibrowser -Iuser -Iinclude \
+          -mno-mmx -mno-sse -mno-sse2 -mno-avx \
+          -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
+
+browser/browser.o: browser/browser.c browser/net.h browser/html.h \
+                   browser/css.h browser/layout.h browser/render.h \
+                   user/libc.h user/tls.h include/font8x8.h
+	$(CC) $(BCFLAGS) -c -o $@ $<
+
+BROWSER: user/crt0.o user/libc.o browser/browser.o
+	$(LD) -m elf_x86_64 -static -nostdlib \
+	      -Ttext=0x400000 -o $@ $^
+	@echo "Built BROWSER ($(shell wc -c < BROWSER) bytes)"
+
+browser: BROWSER
+	@echo "Browser binary ready. Run: make addbrowser"
+
+addbrowser: BROWSER fat32.img
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img BROWSER ::/BROWSER
+	dd if=fat32.img of=engine.img bs=512 seek=512 conv=notrunc status=none
+	@echo ""
+	@echo "  BROWSER added to engine.img"
+	@echo "  Boot ENGINE OS, then at the shell:"
+	@echo "    elf BROWSER"
+	@echo ""
+
+# One-shot: build kernel + browser + write to disk
+browser-all: engine.img BROWSER
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img BROWSER ::/BROWSER
+	dd if=fat32.img of=engine.img bs=512 seek=512 conv=notrunc status=none
+	@echo "engine.img ready with BROWSER. Run: make run"
+
+.PHONY: browser addbrowser browser-all

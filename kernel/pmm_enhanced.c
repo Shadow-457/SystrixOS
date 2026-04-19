@@ -65,18 +65,8 @@ static PmmStats pmm_stats;
 /* ---- Zone structure (NUMA-ready) ------------------------------ */
 
 
-/* Single zone for now: Normal (4MB - 64MB) */
-static MemoryZone zones[1] = {
-    {
-        .start_pfn     = RAM_START / PAGE_SIZE,
-        .end_pfn       = RAM_END / PAGE_SIZE,
-        .free_pages    = 0,
-        .managed_pages = TOTAL_PAGES,
-        .watermark_min = WATERMARK_MIN,
-        .watermark_high = WATERMARK_HIGH,
-        .name          = "Normal"
-    }
-};
+/* Single zone — filled at runtime once ram_end_actual is known */
+static MemoryZone zones[1];
 #define ZONE_NORMAL 0
 #define ZONE_COUNT  1
 
@@ -104,7 +94,7 @@ static void enh_list_remove(u32 o, u32 idx) {
 }
 
 /* ---- Statistics helpers --------------------------------------- */
-static void stats_update_alloc(u32 order) {
+static void __attribute__((unused)) stats_update_alloc(u32 order) {
     pmm_stats.total_allocations++;
     pmm_stats.total_pages_allocated += (1ULL << order);
     pmm_stats.alloc_per_order[order]++;
@@ -115,7 +105,7 @@ static void stats_update_alloc(u32 order) {
         pmm_stats.peak_allocated = pages;
 }
 
-static void stats_update_free(u32 order) {
+static void __attribute__((unused)) stats_update_free(u32 order) {
     pmm_stats.total_frees++;
     pmm_stats.total_pages_freed += (1ULL << order);
     pmm_stats.free_per_order[order]++;
@@ -426,6 +416,13 @@ int pmm_check_poison(u64 phys) {
 
 /* ---- Initialize zone statistics ------------------------------- */
 void pmm_zones_init(void) {
+    zones[0].start_pfn      = RAM_START / PAGE_SIZE;
+    zones[0].end_pfn        = RAM_END   / PAGE_SIZE;
+    zones[0].free_pages     = 0;
+    zones[0].managed_pages  = (RAM_END - RAM_START) / PAGE_SIZE;
+    zones[0].watermark_min  = WATERMARK_MIN;
+    zones[0].watermark_high = WATERMARK_HIGH;
+    __builtin_memcpy(zones[0].name, "Normal", 7);
     for (u32 i = 0; i < ZONE_COUNT; i++) {
         zones[i].free_pages = zones[i].managed_pages;
     }

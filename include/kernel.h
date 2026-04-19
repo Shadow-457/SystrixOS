@@ -24,8 +24,25 @@ typedef u64                usize;
 #define PMM_BMP_SZ    8192
 #define PAGE_SIZE     4096
 #define RAM_START     0x400000UL
-#define RAM_END       0x4000000UL
-#define TOTAL_PAGES   ((RAM_END - RAM_START) / PAGE_SIZE)
+
+/* RAM_END is set at runtime from E820 — use ram_end_actual.
+ * RAM_END_MAX is the compile-time ceiling for static array sizing. */
+#define RAM_END_MAX   0x100000000UL  /* 4 GB ceiling */
+extern u64 ram_end_actual;           /* set by pmm_init()            */
+#define RAM_END       ram_end_actual
+#define TOTAL_PAGES   ((RAM_END_MAX - RAM_START) / PAGE_SIZE)
+
+/* ── E820 BIOS memory map ────────────────────────────────────── */
+/* Written by boot.S at 0x0500 before entering protected mode.   */
+#define E820_MAP_ADDR  0x0500UL
+#define E820_MAX       32
+typedef struct {
+    u64 base;
+    u64 len;
+    u32 type;    /* 1=usable, 2=reserved, 3=ACPI reclaimable         */
+    u32 acpi;
+} __attribute__((packed)) E820Entry;
+#define E820_USABLE  1
 
 #define IDT_BASE      0x500000UL
 #define IDT_ENTRIES   256
@@ -70,6 +87,7 @@ typedef u64                usize;
 #define PSTATE_READY   1
 #define PSTATE_RUNNING 2
 #define PSTATE_DEAD    3
+#define PSTATE_BLOCKED 4   /* sleeping on futex — scheduler skips */
 
 /* PCB field offsets (must match isr.S exactly) */
 #define PCB_STATE   0
@@ -298,12 +316,19 @@ u32   pmm_max_contiguous_order(void);
 void  pmm_dump_freelist(void);
 
 /* VMA type — must be before vmm_enhanced declarations */
-typedef struct { u64 start; u64 end; u32 flags; u32 _pad; } VMA;
+typedef struct {
+    u64 start;
+    u64 end;
+    u32 flags;
+    i64 fd;          /* -1 for anonymous, >=0 for file-backed */
+    u64 file_offset; /* byte offset into file for first page   */
+} VMA;
 #define VMA_READ   (1<<0)
 #define VMA_WRITE  (1<<1)
 #define VMA_EXEC   (1<<2)
 #define VMA_ANON   (1<<3)
 #define VMA_STACK  (1<<4)
+#define VMA_FILE   (1<<5)   /* file-backed mapping */
 #define VMA_MAX    32
 
 /* vmm.c */
@@ -761,6 +786,7 @@ i64  sys_execve(const char *path, char **argv, char **envp);
 i64  sys_clone(u64 flags, void *stack, void *ptid, void *ctid, void *newtls);
 i64  sys_wait4(u64 pid, int *wstatus, u64 options, void *ru);
 i64  sys_exit_group(i64 code);
+i64  sys_futex(u64 *addr, u64 op, u64 val, u64 timeout_ms, u64 *addr2, u64 val3);
 
 /* Security */
 void kaslr_init(void);
@@ -900,11 +926,58 @@ i64  pkg_remove(const char *name);
 #define ECHILD       (-10LL)
 #define ESRCH        (-3LL)
 #define EAGAIN       (-11LL)
+#define EWOULDBLOCK  (-11LL)
+#define EINPROGRESS  (-115LL)
+#define EALREADY     (-114LL)
 #define EBUSY        (-16LL)
 #define ENOTCONN     (-107LL)
+
+/* fcntl */
+#define F_DUPFD      0
+#define F_GETFD      1
+#define F_SETFD      2
+#define F_GETFL      3
+#define F_SETFL      4
+#define FD_CLOEXEC   1
+
+/* open / socket flags */
+#define O_NONBLOCK   0x800
+#define SOCK_NONBLOCK 0x800
+
+/* poll */
+#define POLLIN       0x0001
+#define POLLPRI      0x0002
+#define POLLOUT      0x0004
+#define POLLERR      0x0008
+#define POLLHUP      0x0010
+#define POLLNVAL     0x0020
+
+/* epoll */
+#define EPOLL_CTL_ADD 1
+#define EPOLL_CTL_DEL 2
+#define EPOLL_CTL_MOD 3
+#define EPOLLIN       0x00000001u
+#define EPOLLPRI      0x00000002u
+#define EPOLLOUT      0x00000004u
+#define EPOLLERR      0x00000008u
+#define EPOLLHUP      0x00000010u
+#define EPOLLONESHOT  (1u << 30)
+#define EPOLLET       (1u << 31)
 #define ENETUNREACH  (-101LL)
 #define ENODEV       (-19LL)
 #define ETIMEDOUT    (-110LL)
+#define EISCONN      (-106LL)
+#define ECONNREFUSED (-111LL)
+
+/* clock IDs for clock_gettime (syscall 228) */
+#define CLOCK_REALTIME           0
+#define CLOCK_MONOTONIC          1
+#define CLOCK_PROCESS_CPUTIME_ID 2
+#define CLOCK_THREAD_CPUTIME_ID  3
+#define CLOCK_MONOTONIC_RAW      4
+#define CLOCK_REALTIME_COARSE    5
+#define CLOCK_MONOTONIC_COARSE   6
+#define CLOCK_BOOTTIME           7
 #define ENOTDIR      (-20LL)
 #define ENOSPC       (-28LL)
 #define EOPNOTSUPP   (-95LL)
@@ -979,3 +1052,30 @@ static inline int strncmp(const char *a, const char *b, usize n) {
     while (n-- && *a && *a == *b) { a++; b++; }
     return n == (usize)-1 ? 0 : (u8)*a - (u8)*b;
 }
+
+/* ── poll / epoll structs ──────────────────────────────────────── */
+typedef struct {
+    int   fd;
+    short events;
+    short revents;
+} pollfd_t;
+
+typedef union {
+    u32   u32;
+    u64   u64;
+    void *ptr;
+    int   fd;
+} epoll_data_t;
+
+typedef struct {
+    u32          events;
+    epoll_data_t data;
+} __attribute__((packed)) epoll_event_t;
+
+/* forward decls for poll/epoll/fcntl syscalls */
+i64 sys_poll(pollfd_t *fds, u64 nfds, int timeout_ms);
+i64 sys_select(int nfds, void *rfds, void *wfds, void *efds, void *tv);
+i64 sys_fcntl(u64 fd, u64 cmd, u64 arg);
+i64 sys_epoll_create(int flags);
+i64 sys_epoll_ctl(int epfd, int op, int fd, epoll_event_t *ev);
+i64 sys_epoll_wait(int epfd, epoll_event_t *evs, int maxevents, int timeout_ms);

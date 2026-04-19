@@ -397,3 +397,142 @@ static inline long poll_pad(PadState *buf) {
         : "rcx","r11","memory");
     return r;
 }
+
+/* ── environ / getenv / setenv ───────────────────────────────── */
+#define ENV_MAX     128
+#define ENV_KEY_MAX  64
+#define ENV_VAL_MAX 256
+
+typedef struct { char key[ENV_KEY_MAX]; char val[ENV_VAL_MAX]; } _EnvEntry;
+
+static _EnvEntry   _env_table[ENV_MAX];
+static int         _env_count = 0;
+/* POSIX-compatible environ pointer array (NULL-terminated, "KEY=VAL") */
+static char       *_environ_ptrs[ENV_MAX + 1];
+static char        _environ_bufs[ENV_MAX][ENV_KEY_MAX + ENV_VAL_MAX + 2];
+extern char      **environ;   /* defined in libc.c */
+
+static inline void _env_rebuild(void) {
+    for (int i = 0; i < _env_count; i++) {
+        char *b = _environ_bufs[i];
+        int  ki = 0, vi = 0, bi = 0;
+        while (_env_table[i].key[ki]) { b[bi++] = _env_table[i].key[ki++]; }
+        b[bi++] = '=';
+        while (_env_table[i].val[vi]) { b[bi++] = _env_table[i].val[vi++]; }
+        b[bi] = '\0';
+        _environ_ptrs[i] = b;
+    }
+    _environ_ptrs[_env_count] = (char*)0;
+}
+
+static inline char *getenv(const char *name) {
+    if (!name) return (char*)0;
+    for (int i = 0; i < _env_count; i++) {
+        const char *a = name, *b = _env_table[i].key;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == '\0' && *b == '\0') return _env_table[i].val;
+    }
+    return (char*)0;
+}
+
+static inline int setenv(const char *name, const char *value, int overwrite) {
+    if (!name || name[0] == '\0') return -1;
+    for (int i = 0; i < _env_count; i++) {
+        const char *a = name, *b = _env_table[i].key;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == '\0' && *b == '\0') {
+            if (!overwrite) return 0;
+            int vi = 0;
+            while (value && value[vi] && vi < ENV_VAL_MAX - 1)
+                { _env_table[i].val[vi] = value[vi]; vi++; }
+            _env_table[i].val[vi] = '\0';
+            _env_rebuild();
+            return 0;
+        }
+    }
+    if (_env_count >= ENV_MAX) return -1;
+    int ki = 0;
+    while (name[ki] && ki < ENV_KEY_MAX - 1)
+        { _env_table[_env_count].key[ki] = name[ki]; ki++; }
+    _env_table[_env_count].key[ki] = '\0';
+    int vi = 0;
+    while (value && value[vi] && vi < ENV_VAL_MAX - 1)
+        { _env_table[_env_count].val[vi] = value[vi]; vi++; }
+    _env_table[_env_count].val[vi] = '\0';
+    _env_count++;
+    _env_rebuild();
+    return 0;
+}
+
+static inline int unsetenv(const char *name) {
+    if (!name) return -1;
+    for (int i = 0; i < _env_count; i++) {
+        const char *a = name, *b = _env_table[i].key;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == '\0' && *b == '\0') {
+            _env_table[i] = _env_table[_env_count - 1];
+            _env_count--;
+            _env_rebuild();
+            return 0;
+        }
+    }
+    return 0;
+}
+
+static inline int putenv(char *str) {
+    if (!str) return -1;
+    char key[ENV_KEY_MAX]; int ki = 0;
+    while (str[ki] && str[ki] != '=' && ki < ENV_KEY_MAX - 1)
+        { key[ki] = str[ki]; ki++; }
+    key[ki] = '\0';
+    const char *val = (str[ki] == '=') ? str + ki + 1 : "";
+    return setenv(key, val, 1);
+}
+
+static inline int clearenv(void) {
+    _env_count = 0;
+    _environ_ptrs[0] = (char*)0;
+    return 0;
+}
+
+/* defined in libc.c — called from crt0.S before main() */
+void env_init_defaults(void);
+
+/* ── Locale ────────────────────────────────────────────────────── */
+#define LC_ALL       0
+#define LC_COLLATE   1
+#define LC_CTYPE     2
+#define LC_MONETARY  3
+#define LC_NUMERIC   4
+#define LC_TIME      5
+#define LC_MESSAGES  6
+
+struct lconv {
+    char *decimal_point;
+    char *thousands_sep;
+    char *grouping;
+    char *int_curr_symbol;
+    char *currency_symbol;
+    char *mon_decimal_point;
+    char *mon_thousands_sep;
+    char *mon_grouping;
+    char *positive_sign;
+    char *negative_sign;
+    char  int_frac_digits;
+    char  frac_digits;
+    char  p_cs_precedes;
+    char  p_sep_by_space;
+    char  n_cs_precedes;
+    char  n_sep_by_space;
+    char  p_sign_posn;
+    char  n_sign_posn;
+    char  int_p_cs_precedes;
+    char  int_n_cs_precedes;
+    char  int_p_sep_by_space;
+    char  int_n_sep_by_space;
+    char  int_p_sign_posn;
+    char  int_n_sign_posn;
+};
+
+char        *setlocale(int category, const char *locale);
+struct lconv *localeconv(void);

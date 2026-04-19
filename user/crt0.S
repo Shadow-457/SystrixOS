@@ -20,6 +20,9 @@ _start:
     # ── Align stack to 16 bytes (System V AMD64 ABI) ─────────────
     and  rsp, -16
 
+    # ── Seed default environment variables ───────────────────────
+    call env_init_defaults
+
     # ── Zero argc / argv / envp (no shell arg passing yet) ───────
     xor  rdi, rdi       # argc = 0
     xor  rsi, rsi       # argv = NULL

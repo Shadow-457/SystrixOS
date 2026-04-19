@@ -139,12 +139,19 @@ i64 sys_yield(void) { return 0; }
 /* ── 9: sys_mmap ─────────────────────────────────────────────── */
 /* Demand-paging mmap: register a VMA, do NOT allocate physical pages.
  * Pages are faulted in lazily by vmm_page_fault() on first access.
- * This matches Linux anonymous mmap behaviour. */
+ * Supports both anonymous (MAP_ANONYMOUS) and file-backed mappings.
+ * File-backed: VMA stores fd + offset; page fault reads file data. */
 static u64 mmap_bump = MMAP_BASE;
 
 void *sys_mmap(u64 addr, usize len, u64 prot, u64 flags, u64 fd, u64 off) {
-    (void)fd; (void)off;
-    if (!(flags & MAP_ANONYMOUS)) return (void*)(usize)ENOMEM;
+    int is_anon = (flags & MAP_ANONYMOUS) || (i64)fd < 0;
+
+    /* Validate file fd for file-backed mappings */
+    if (!is_anon) {
+        extern FD fd_table[];
+        if (fd >= MAX_FILES || !fd_table[fd].in_use)
+            return (void*)(usize)EBADF;
+    }
 
     len = (len + PAGE_SIZE - 1) & ~(usize)(PAGE_SIZE - 1);
     if (!len) return (void*)(usize)ENOMEM;
@@ -158,11 +165,22 @@ void *sys_mmap(u64 addr, usize len, u64 prot, u64 flags, u64 fd, u64 off) {
     /* Register VMA for demand paging */
     VMA *vmas = (VMA*)(usize)pcb->vma_table;
     if (vmas) {
-        u32 vma_flags = VMA_ANON;
+        u32 vma_flags = is_anon ? VMA_ANON : VMA_FILE;
         if (prot & 1) vma_flags |= VMA_READ;
         if (prot & 2) vma_flags |= VMA_WRITE;
         if (prot & 4) vma_flags |= VMA_EXEC;
-        vmm_vma_add(vmas, virt, virt + len, vma_flags);
+
+        /* Find free VMA slot and fill in fd/offset for file-backed */
+        for (int i = 0; i < VMA_MAX; i++) {
+            if (vmas[i].start == vmas[i].end) {
+                vmas[i].start       = virt;
+                vmas[i].end         = virt + len;
+                vmas[i].flags       = vma_flags;
+                vmas[i].fd          = is_anon ? -1 : (i64)fd;
+                vmas[i].file_offset = is_anon ? 0  : off;
+                break;
+            }
+        }
     }
 
     if (!(flags & MAP_FIXED)) mmap_bump += len;
@@ -361,6 +379,42 @@ i64 sys_gettimeofday(void *tv_ptr, void *tz) {
     return 0;
 }
 
+/* ── 228: sys_clock_gettime ──────────────────────────────────── */
+typedef struct { i64 tv_sec; i64 tv_nsec; } TimeSpec;
+i64 sys_clock_gettime(u64 clkid, void *ts_ptr) {
+    if (!ts_ptr) return (i64)EINVAL;
+    TimeSpec *ts = (TimeSpec*)ts_ptr;
+    /* all clocks backed by pit_ticks (ms resolution) */
+    switch (clkid) {
+    case 0: /* CLOCK_REALTIME          */
+    case 1: /* CLOCK_MONOTONIC         */
+    case 4: /* CLOCK_MONOTONIC_RAW     */
+    case 5: /* CLOCK_REALTIME_COARSE   */
+    case 6: /* CLOCK_MONOTONIC_COARSE  */
+    case 7: /* CLOCK_BOOTTIME          */
+        ts->tv_sec  = (i64)(pit_ticks / 1000);
+        ts->tv_nsec = (i64)((pit_ticks % 1000) * 1000000LL);
+        return 0;
+    case 2: /* CLOCK_PROCESS_CPUTIME_ID */
+    case 3: /* CLOCK_THREAD_CPUTIME_ID  */
+        ts->tv_sec  = (i64)(pit_ticks / 1000);
+        ts->tv_nsec = (i64)((pit_ticks % 1000) * 1000000LL);
+        return 0;
+    default:
+        return (i64)EINVAL;
+    }
+}
+
+/* ── 263: sys_clock_getres ───────────────────────────────────── */
+i64 sys_clock_getres(u64 clkid, void *ts_ptr) {
+    (void)clkid;
+    if (!ts_ptr) return 0;
+    TimeSpec *ts = (TimeSpec*)ts_ptr;
+    ts->tv_sec  = 0;
+    ts->tv_nsec = 1000000LL; /* 1 ms resolution */
+    return 0;
+}
+
 /* ── 102: sys_getuid ─────────────────────────────────────────── */
 i64 sys_getuid(void) { return 0; }
 
@@ -536,4 +590,15 @@ void input_set_mouse_grab(int grabbed);   /* defined in input.c   */
 i64 sys_mouse_setmode(u64 mode) {
     input_set_mouse_grab((int)(mode & 1));
     return 0;
+}
+
+/* ── 333: sys_net_dns — resolve hostname → IPv4 address ──────── */
+/* Wraps kernel net_dns_resolve() for userspace browsers/apps.
+ * arg0 (rdi): pointer to null-terminated hostname string
+ * Returns: IPv4 address in network byte order, or 0 on failure.  */
+u32 net_dns_resolve(const char *hostname);   /* defined in net.c   */
+
+i64 sys_net_dns(const char *hostname) {
+    if (!hostname) return 0;
+    return (i64)(u64)net_dns_resolve(hostname);
 }

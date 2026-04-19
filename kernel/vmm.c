@@ -199,9 +199,11 @@ void vmm_vma_free(VMA *table) { heap_free(table); }
 int vmm_vma_add(VMA *table, u64 start, u64 end, u32 flags) {
     for (int i = 0; i < VMA_MAX; i++) {
         if (table[i].start == table[i].end) {  /* empty slot */
-            table[i].start = start;
-            table[i].end   = end;
-            table[i].flags = flags;
+            table[i].start       = start;
+            table[i].end         = end;
+            table[i].flags       = flags;
+            table[i].fd          = -1;
+            table[i].file_offset = 0;
             return 0;
         }
     }
@@ -288,6 +290,24 @@ int vmm_page_fault(u64 fault_addr, u64 error_code) {
         u64 phys = pmm_alloc();
         if (!phys) return 0;   /* OOM */
         memset((void*)phys, 0, PAGE_SIZE);
+
+        /* File-backed: read file data into the page */
+        if ((vma->flags & VMA_FILE) && vma->fd >= 0) {
+            u64 page_index  = (page - vma->start) / PAGE_SIZE;
+            u64 file_off    = vma->file_offset + page_index * PAGE_SIZE;
+            /* Save/restore fd position around our read */
+            extern FD fd_table[];
+            FD *f = &fd_table[vma->fd];
+            if (f->in_use && file_off < f->size) {
+                u32 old_pos = f->pos;
+                vfs_seek(vma->fd, (i64)file_off, 0);
+                usize to_read = PAGE_SIZE;
+                if (file_off + to_read > f->size)
+                    to_read = f->size - (u32)file_off;
+                vfs_read(vma->fd, (void*)phys, to_read);
+                f->pos = old_pos;  /* restore position */
+            }
+        }
 
         u64 flags = PTE_PRESENT | PTE_USER;
         if (vma->flags & VMA_WRITE) flags |= PTE_WRITE;

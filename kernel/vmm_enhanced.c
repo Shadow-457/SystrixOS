@@ -131,10 +131,11 @@ static int vma_insert_sorted(VMA *table, u64 start, u64 end, u32 flags) {
         insert_pos = empty_pos;
     }
 
-    table[insert_pos].start = start;
-    table[insert_pos].end   = end;
-    table[insert_pos].flags = flags;
-    table[insert_pos]._pad  = 0;
+    table[insert_pos].start       = start;
+    table[insert_pos].end         = end;
+    table[insert_pos].flags       = flags;
+    table[insert_pos].fd          = -1;
+    table[insert_pos].file_offset = 0;
 
     return 0;
 }
@@ -155,10 +156,12 @@ int vmm_vma_split(VMA *table, u64 addr, u32 new_flags) {
         if (empty < 0) return -1;
 
         /* Create second half */
-        table[empty].start = addr;
-        table[empty].end   = table[i].end;
-        table[empty].flags = new_flags;
-        table[empty]._pad  = 0;
+        table[empty].start       = addr;
+        table[empty].end         = table[i].end;
+        table[empty].flags       = new_flags;
+        table[empty].fd          = table[i].fd;
+        table[empty].file_offset = table[i].file_offset +
+                                   (addr - table[i].start);
 
         /* Shrink first half */
         table[i].end = addr;

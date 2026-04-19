@@ -403,7 +403,7 @@ syscall_entry:
     push rdi;  push rsi;  push rdx
     push r8;   push r9;   push r10
 
-    cmp  rax, 332
+    cmp  rax, 352
     ja   .sc_bad
 
     lea  rbx, [rip + syscall_table]
@@ -446,7 +446,7 @@ syscall_table:
     .quad sys_exit_handler      # 4
     .quad sys_fstat             # 5
     .quad sys_free              # 6
-    .quad sys_yield             # 7
+    .quad sys_poll              # 7  poll
     .quad sys_lseek             # 8
     .quad sys_mmap              # 9
     .quad sys_mprotect          # 10
@@ -454,8 +454,16 @@ syscall_table:
     .quad sys_brk               # 12
     .quad sys_stub              # 13 rt_sigaction
     .quad sys_stub              # 14 rt_sigprocmask
+    .quad 0                     # 15 rt_sigreturn (stub)
+    .quad 0                     # 16 ioctl (stub)
+    .quad 0                     # 17 pread64 (stub)
+    .quad 0                     # 18 pwrite64 (stub)
+    .quad 0                     # 19 readv (stub)
+    .quad sys_writev            # 20 writev
+    .quad 0                     # 21 access (stub)
     .quad sys_pipe              # 22 pipe
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 23-30
+    .quad sys_select; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 23-30
+    .quad 0                     # 31 tgkill (stub)
     .quad sys_dup               # 32
     .quad sys_dup2              # 33 dup2
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 34-38
@@ -479,7 +487,7 @@ syscall_table:
     .quad sys_lseek62           # 62 lseek
     .quad sys_uname             # 63
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 64-71
-    .quad sys_stub              # 72 fcntl
+    .quad sys_fcntl             # 72 fcntl
     .quad 0; .quad 0; .quad 0; .quad 0   # 73-76
     .quad sys_getdents64        # 77 getdents
     .quad sys_getdents64        # 78 getdents64
@@ -513,14 +521,16 @@ syscall_table:
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 175-182
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 183-190
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 191-198
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 199-206
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 207-214
+    .quad 0; .quad 0; .quad 0           # 199-201
+    .quad sys_futex                     # 202 futex
+    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 203-207
+    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad sys_epoll_create; .quad 0   # 207-214
     .quad 0; .quad 0; .quad 0            # 215-217
     .quad sys_stub              # 218 set_tid_address
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 219-226
-    .quad 0; .quad 0; .quad 0; .quad 0   # 227-230
+    .quad 0; .quad sys_clock_gettime; .quad sys_clock_getres; .quad 0   # 227-230
     .quad sys_exit_group        # 231 exit_group
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 232-239
+    .quad sys_epoll_wait; .quad sys_epoll_ctl; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 232-239
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 240-247
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 248-255
     .quad 0                     # 256
@@ -528,7 +538,7 @@ syscall_table:
     .quad 0; .quad 0; .quad 0; .quad 0   # 258-261
     .quad sys_fstatat           # 262
     # 263-299: reserved
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 263-270
+    .quad sys_clock_getres; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 263-270
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 271-278
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 279-286
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 287-294
@@ -536,7 +546,7 @@ syscall_table:
     .quad sys_poll_keys         # 300
     .quad sys_poll_mouse        # 301
     .quad sys_poll_pad          # 302
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0            # 303-309
+    .quad sys_yield; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0            # 303-309
     .quad sys_gfx_flip          # 310
     .quad sys_gfx_clear         # 311
     .quad sys_gfx_blit          # 312
@@ -558,7 +568,8 @@ syscall_table:
     .quad sys_ipc_recv      # 330
     .quad sys_ipc_register  # 331
     .quad sys_ipc_lookup    # 332
-    .quad 0; .quad 0; .quad 0; .quad 0                           # 333-336
+    .quad sys_net_dns               # 333
+    .quad 0; .quad 0; .quad 0                               # 334-336
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 337-344
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0                               # 345-349
     .quad sys_pkg_install       # 350
@@ -573,14 +584,18 @@ kernel_return_rsp:  .quad 0
 .extern sys_exit_handler, sys_malloc, sys_free, sys_yield
 .extern sys_mmap, sys_mprotect, sys_munmap, sys_brk
 .extern sys_writev, sys_stub, sys_stub_noent, sys_stub_enosys
+.extern sys_futex
 .extern sys_getpid, sys_uname, sys_getdents64, sys_getcwd
 .extern sys_gettimeofday, sys_getuid, sys_getgid, sys_arch_prctl
 .extern sys_openat, sys_fstatat
+.extern sys_clock_gettime, sys_clock_getres
 .extern sys_fstat, sys_lseek, sys_lseek62, sys_dup, sys_dup2
 .extern sys_rename, sys_mkdir, sys_rmdir, sys_unlink
 .extern sys_gettime_ms, sys_mouse_setmode
 .extern sys_ipc_send, sys_ipc_recv, sys_ipc_register, sys_ipc_lookup
 .extern sys_poll_keys, sys_poll_mouse, sys_poll_pad
+.extern sys_poll, sys_select, sys_fcntl
+.extern sys_epoll_create, sys_epoll_ctl, sys_epoll_wait
 .extern sys_gfx_flip, sys_gfx_clear, sys_gfx_blit, sys_gfx_set_colorkey
 .extern sys_gfx_draw_tile, sys_gfx_set_tilemap, sys_gfx_render_layer
 .extern sys_snd_opl_write, sys_snd_opl_note, sys_snd_opl_reset
@@ -591,3 +606,4 @@ kernel_return_rsp:  .quad 0
 .extern sys_send, sys_recv, sys_close_socket
 .extern sys_fork, sys_execve, sys_clone, sys_wait4, sys_exit_group
 .extern sys_pkg_install, sys_pkg_remove, sys_pkg_list
+.extern sys_net_dns

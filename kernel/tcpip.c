@@ -97,6 +97,7 @@ typedef struct {
     u8 send_buf[8192];
     usize send_len;
     int type;
+    int nonblock;
 } socket_t;
 
 static socket_t socket_table[SOCKET_MAX];
@@ -272,12 +273,15 @@ static void tcp_send(int sock_idx, u8 flags) {
 
 i64 sys_socket(int domain, int type, int protocol) {
     (void)domain; (void)protocol;
+    int nonblock = (type & 0x800) ? 1 : 0;
+    type &= ~0x800;
     int idx = socket_alloc();
     if (idx < 0) return (i64)ENOMEM;
-    socket_table[idx].type = type;
-    socket_table[idx].state = TCP_CLOSED;
+    socket_table[idx].type     = type ? type : 1;
+    socket_table[idx].nonblock = nonblock;
+    socket_table[idx].state    = TCP_CLOSED;
     socket_table[idx].local_port = alloc_port();
-    socket_table[idx].window = 8192;
+    socket_table[idx].window   = 8192;
     return idx;
 }
 
@@ -304,13 +308,24 @@ i64 sys_connect(int sockfd, const void *addr, usize addrlen) {
     (void)addrlen;
     socket_t *s = socket_get(sockfd);
     if (!s) return (i64)EBADF;
+    /* already connecting */
+    if (s->state == TCP_SYN_SENT) return (i64)EALREADY;
+    if (s->state == TCP_ESTABLISHED) return (i64)EISCONN;
     const u8 *a = (const u8*)addr;
-    s->remote_ip = *(u32*)(a + 4);
+    s->remote_ip   = *(u32*)(a + 4);
     s->remote_port = (u16)a[2] << 8 | a[3];
-    s->seq = 0x12345678;
-    s->state = TCP_SYN_SENT;
+    s->seq         = 0x12345678;
+    s->state       = TCP_SYN_SENT;
     tcp_send(sockfd, TCP_SYN);
-    return 0;
+    /* nonblock: return EINPROGRESS immediately */
+    if (s->nonblock) return (i64)EINPROGRESS;
+    /* blocking: spin until established or timeout */
+    for (int i = 0; i < 100000; i++) {
+        if (s->state == TCP_ESTABLISHED) return 0;
+        if (s->state == TCP_CLOSED)      return (i64)ECONNREFUSED;
+        __asm__ volatile("pause");
+    }
+    return (i64)ETIMEDOUT;
 }
 
 i64 sys_accept(int sockfd, void *addr, usize *addrlen) {
@@ -322,6 +337,16 @@ i64 sys_accept(int sockfd, void *addr, usize *addrlen) {
         if (socket_table[i].state == TCP_ESTABLISHED && socket_table[i].remote_port != 0) {
             return i;
         }
+    }
+    /* no pending connection */
+    if (s->nonblock) return (i64)EAGAIN;
+    /* blocking: spin-wait for incoming connection */
+    for (int spin = 0; spin < 2000000; spin++) {
+        for (int i = 0; i < SOCKET_MAX; i++) {
+            if (socket_table[i].state == TCP_ESTABLISHED && socket_table[i].remote_port != 0)
+                return i;
+        }
+        __asm__ volatile("pause");
     }
     return (i64)EAGAIN;
 }
@@ -374,7 +399,17 @@ i64 sys_recv(int sockfd, void *buf, usize len, int flags) {
     socket_t *s = socket_get(sockfd);
     if (!s) return (i64)EBADF;
     if (s->state != TCP_ESTABLISHED) return (i64)ENOTCONN;
-    if (s->recv_len == 0) return (i64)EAGAIN;
+    /* nonblock: return EAGAIN immediately if no data */
+    if (s->recv_len == 0) {
+        if (s->nonblock) return (i64)EAGAIN;
+        /* blocking: spin-wait */
+        for (int i = 0; i < 2000000; i++) {
+            if (s->recv_len > 0) break;
+            if (s->state != TCP_ESTABLISHED) return (i64)ENOTCONN;
+            __asm__ volatile("pause");
+        }
+        if (s->recv_len == 0) return (i64)EAGAIN;
+    }
     if (len > s->recv_len) len = s->recv_len;
     if (buf && len > 0) {
         memcpy(buf, s->recv_buf + s->recv_pos, len);
@@ -465,4 +500,232 @@ void tcpip_handle_packet(u8 *data, usize len) {
         udp_hdr_t *udp = (udp_hdr_t*)(data + ETH_HDR_LEN + (ip->ver_ihl & 0x0F) * 4);
         (void)udp;
     }
+}
+
+/* ── 72: sys_fcntl ────────────────────────────────────────────── */
+i64 sys_fcntl(u64 fd, u64 cmd, u64 arg) {
+    /* Try socket table first */
+    if ((int)fd >= 0 && (int)fd < SOCKET_MAX && socket_table[(int)fd].type != 0) {
+        socket_t *s = &socket_table[(int)fd];
+        switch (cmd) {
+        case 3: /* F_GETFL */
+            return s->nonblock ? 0x800 : 0;
+        case 4: /* F_SETFL */
+            s->nonblock = (arg & 0x800) ? 1 : 0;
+            return 0;
+        case 1: /* F_GETFD */
+            return 0;
+        case 2: /* F_SETFD */
+            return 0;
+        default:
+            return 0;
+        }
+    }
+    /* Regular file fd: just handle F_GETFL/F_SETFL as no-ops */
+    (void)arg;
+    if (cmd == 1 || cmd == 2) return 0; /* F_GETFD/F_SETFD */
+    if (cmd == 3) return 0;             /* F_GETFL */
+    if (cmd == 4) return 0;             /* F_SETFL */
+    return 0;
+}
+
+/* ── epoll internals ──────────────────────────────────────────── */
+#define EPOLL_MAX_INSTANCES 8
+#define EPOLL_MAX_WATCHES   64
+
+typedef struct {
+    int          fd;
+    u32          events;
+    epoll_data_t data;
+} epoll_watch_t;
+
+typedef struct {
+    int          used;
+    int          nwatches;
+    epoll_watch_t watches[EPOLL_MAX_WATCHES];
+} epoll_inst_t;
+
+/* epoll instances live above socket fd space */
+#define EPOLL_FD_BASE 200
+static epoll_inst_t epoll_table[EPOLL_MAX_INSTANCES];
+
+/* ── 213: sys_epoll_create ────────────────────────────────────── */
+i64 sys_epoll_create(int flags) {
+    (void)flags;
+    for (int i = 0; i < EPOLL_MAX_INSTANCES; i++) {
+        if (!epoll_table[i].used) {
+            epoll_table[i].used     = 1;
+            epoll_table[i].nwatches = 0;
+            return EPOLL_FD_BASE + i;
+        }
+    }
+    return (i64)ENOMEM;
+}
+
+/* ── 233: sys_epoll_ctl ───────────────────────────────────────── */
+i64 sys_epoll_ctl(int epfd, int op, int fd, epoll_event_t *ev) {
+    int idx = epfd - EPOLL_FD_BASE;
+    if (idx < 0 || idx >= EPOLL_MAX_INSTANCES || !epoll_table[idx].used)
+        return (i64)EBADF;
+    epoll_inst_t *ep = &epoll_table[idx];
+
+    if (op == 1) { /* EPOLL_CTL_ADD */
+        if (ep->nwatches >= EPOLL_MAX_WATCHES) return (i64)ENOMEM;
+        ep->watches[ep->nwatches].fd     = fd;
+        ep->watches[ep->nwatches].events = ev ? ev->events : 0;
+        ep->watches[ep->nwatches].data   = ev ? ev->data : (epoll_data_t){0};
+        ep->nwatches++;
+        return 0;
+    } else if (op == 3) { /* EPOLL_CTL_MOD */
+        for (int i = 0; i < ep->nwatches; i++) {
+            if (ep->watches[i].fd == fd) {
+                ep->watches[i].events = ev ? ev->events : 0;
+                ep->watches[i].data   = ev ? ev->data : (epoll_data_t){0};
+                return 0;
+            }
+        }
+        return (i64)ENOENT;
+    } else if (op == 2) { /* EPOLL_CTL_DEL */
+        for (int i = 0; i < ep->nwatches; i++) {
+            if (ep->watches[i].fd == fd) {
+                ep->watches[i] = ep->watches[ep->nwatches - 1];
+                ep->nwatches--;
+                return 0;
+            }
+        }
+        return (i64)ENOENT;
+    }
+    return (i64)EINVAL;
+}
+
+/* helper: check if a watched fd is ready */
+static u32 epoll_check_fd(int fd) {
+    if (fd < 0 || fd >= SOCKET_MAX || socket_table[fd].type == 0) return 0;
+    socket_t *s = &socket_table[fd];
+    u32 ready = 0;
+    if (s->recv_len > 0 || s->state == TCP_CLOSE_WAIT)
+        ready |= 0x00000001u; /* EPOLLIN */
+    if (s->state == TCP_ESTABLISHED)
+        ready |= 0x00000004u; /* EPOLLOUT */
+    if (s->state == TCP_CLOSED && s->type != 0)
+        ready |= 0x00000010u; /* EPOLLHUP */
+    return ready;
+}
+
+/* ── 232: sys_epoll_wait ──────────────────────────────────────── */
+i64 sys_epoll_wait(int epfd, epoll_event_t *evs, int maxevents, int timeout_ms) {
+    int idx = epfd - EPOLL_FD_BASE;
+    if (idx < 0 || idx >= EPOLL_MAX_INSTANCES || !epoll_table[idx].used)
+        return (i64)EBADF;
+    if (!evs || maxevents <= 0) return (i64)EINVAL;
+    epoll_inst_t *ep = &epoll_table[idx];
+
+    /* how many loops: timeout_ms<0 = infinite (cap at 10M), 0 = nonblock */
+    int loops = (timeout_ms < 0) ? 10000000 : (timeout_ms == 0 ? 1 : timeout_ms * 1000);
+
+    for (int iter = 0; iter < loops; iter++) {
+        int n = 0;
+        for (int i = 0; i < ep->nwatches && n < maxevents; i++) {
+            u32 ready = epoll_check_fd(ep->watches[i].fd);
+            u32 fired = ready & ep->watches[i].events;
+            if (fired) {
+                evs[n].events = fired;
+                evs[n].data   = ep->watches[i].data;
+                n++;
+            }
+        }
+        if (n > 0) return n;
+        if (timeout_ms == 0) return 0;
+        __asm__ volatile("pause");
+    }
+    return 0; /* timeout */
+}
+
+/* ── 7: sys_poll ──────────────────────────────────────────────── */
+i64 sys_poll(pollfd_t *fds, u64 nfds, int timeout_ms) {
+    if (!fds || nfds == 0) return 0;
+
+    int loops = (timeout_ms < 0) ? 10000000 : (timeout_ms == 0 ? 1 : timeout_ms * 1000);
+
+    for (int iter = 0; iter < loops; iter++) {
+        int n = 0;
+        for (u64 i = 0; i < nfds; i++) {
+            fds[i].revents = 0;
+            if (fds[i].fd < 0) continue;
+            u32 ready = epoll_check_fd(fds[i].fd);
+            short r = 0;
+            if ((fds[i].events & 0x0001) && (ready & 0x1)) r |= 0x0001; /* POLLIN  */
+            if ((fds[i].events & 0x0004) && (ready & 0x4)) r |= 0x0004; /* POLLOUT */
+            if (ready & 0x8)  r |= 0x0008; /* POLLERR */
+            if (ready & 0x10) r |= 0x0010; /* POLLHUP */
+            fds[i].revents = r;
+            if (r) n++;
+        }
+        if (n > 0) return n;
+        if (timeout_ms == 0) return 0;
+        __asm__ volatile("pause");
+    }
+    return 0;
+}
+
+/* ── 23: sys_select ───────────────────────────────────────────── */
+/* fd_set: 128 bytes (1024 bits) matching Linux ABI */
+typedef struct { u64 bits[16]; } kernel_fd_set;
+
+static inline int fdset_isset(kernel_fd_set *s, int fd) {
+    if (!s || fd < 0 || fd >= 1024) return 0;
+    return (s->bits[fd / 64] >> (fd % 64)) & 1;
+}
+static inline void fdset_set(kernel_fd_set *s, int fd) {
+    if (!s || fd < 0 || fd >= 1024) return;
+    s->bits[fd / 64] |= (1ull << (fd % 64));
+}
+static inline void fdset_clr(kernel_fd_set *s, int fd) {
+    if (!s || fd < 0 || fd >= 1024) return;
+    s->bits[fd / 64] &= ~(1ull << (fd % 64));
+}
+
+i64 sys_select(int nfds, void *rfds_v, void *wfds_v, void *efds_v, void *tv_v) {
+    kernel_fd_set *rfds = (kernel_fd_set*)rfds_v;
+    kernel_fd_set *wfds = (kernel_fd_set*)wfds_v;
+    kernel_fd_set *efds = (kernel_fd_set*)efds_v;
+    (void)efds;
+
+    /* timeout: NULL = infinite (cap), {0,0} = nonblock */
+    int loops = 10000000;
+    if (tv_v) {
+        u64 *tv = (u64*)tv_v;
+        u64 sec = tv[0], usec = tv[1];
+        u64 total_us = sec * 1000000 + usec;
+        loops = (int)(total_us > 0 ? total_us : 1);
+    }
+
+    /* working copies to return ready sets */
+    kernel_fd_set out_r = {0}, out_w = {0};
+
+    for (int iter = 0; iter < loops; iter++) {
+        int n = 0;
+        for (int fd = 0; fd < nfds && fd < SOCKET_MAX; fd++) {
+            u32 ready = epoll_check_fd(fd);
+            if (rfds && fdset_isset(rfds, fd) && (ready & 0x1)) {
+                fdset_set(&out_r, fd); n++;
+            }
+            if (wfds && fdset_isset(wfds, fd) && (ready & 0x4)) {
+                fdset_set(&out_w, fd); n++;
+            }
+        }
+        if (n > 0) {
+            if (rfds) *rfds = out_r;
+            if (wfds) *wfds = out_w;
+            return n;
+        }
+        if (tv_v) {
+            u64 *tv = (u64*)tv_v;
+            if (tv[0] == 0 && tv[1] == 0) return 0; /* nonblock */
+        }
+        __asm__ volatile("pause");
+    }
+    if (rfds) for (int i=0;i<16;i++) rfds->bits[i]=0;
+    if (wfds) for (int i=0;i<16;i++) wfds->bits[i]=0;
+    return 0;
 }

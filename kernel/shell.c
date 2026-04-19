@@ -174,11 +174,43 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
     }
     if (strcmp(cmd->argv[0], "cd") == 0) {
         if (cmd->argc > 1) {
-            usize len = strlen(cmd->argv[1]);
-            if (len < MAX_PATH) {
-                memset(shell_cwd, 0, MAX_PATH);
-                memcpy(shell_cwd, cmd->argv[1], len);
+            const char *target = cmd->argv[1];
+            char new_cwd[MAX_PATH];
+            if (target[0] == '/') {
+                /* Absolute path */
+                usize len = strlen(target);
+                if (len >= MAX_PATH) len = MAX_PATH - 1;
+                memcpy(new_cwd, target, len);
+                new_cwd[len] = 0;
+            } else if (target[0] == '.' && target[1] == '.' && target[2] == 0) {
+                /* Go up one level */
+                memcpy(new_cwd, shell_cwd, MAX_PATH);
+                /* Strip trailing slash if not root */
+                int p = 0; while (new_cwd[p]) p++;
+                if (p > 1 && new_cwd[p-1] == '/') { p--; new_cwd[p] = 0; }
+                /* Find and chop last component */
+                while (p > 0 && new_cwd[p] != '/') p--;
+                if (p == 0) { new_cwd[0] = '/'; new_cwd[1] = 0; }
+                else new_cwd[p] = 0;
+            } else if (target[0] == '.' && target[1] == 0) {
+                /* Stay — no-op */
+                return 0;
+            } else {
+                /* Relative: append to cwd */
+                memcpy(new_cwd, shell_cwd, MAX_PATH);
+                int p = 0; while (new_cwd[p]) p++;
+                if (p > 0 && new_cwd[p-1] != '/' && p < MAX_PATH - 1)
+                    new_cwd[p++] = '/';
+                usize tlen = strlen(target);
+                if (p + (int)tlen < MAX_PATH - 1) {
+                    memcpy(new_cwd + p, target, tlen);
+                    new_cwd[p + tlen] = 0;
+                }
             }
+            memcpy(shell_cwd, new_cwd, MAX_PATH);
+        } else {
+            /* cd with no args goes to root */
+            shell_cwd[0] = '/'; shell_cwd[1] = 0;
         }
         return 0;
     }
@@ -296,7 +328,9 @@ void shell_run(void) {
     print_str("\r\nENGINE OS Shell v1.0\r\n");
     print_str("Type 'help' for commands\r\n\r\n");
     while (1) {
-        print_str(shell_prompt);
+        print_str("engine:");
+        print_str(shell_cwd);
+        print_str("$ ");
         int pos = 0;
         memset(shell_line, 0, SHELL_MAX_LINE);
         while (1) {

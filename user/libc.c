@@ -1100,3 +1100,43 @@ int rename_file(const char *old, const char *nw) {
         : "rcx","r11","memory");
     return (int)r;
 }
+
+/* ── environ — defined once here, extern in libc.h ─────────────── */
+#define ENV_MAX     128
+static char  *_environ_ptrs[ENV_MAX + 1];
+char        **environ = _environ_ptrs;
+
+/* ── env_init_defaults — called from crt0.S before main() ──────── */
+/* setenv is defined as static inline in libc.h and visible here    */
+void env_init_defaults(void) {
+    setenv("PATH",    "/bin:/usr/bin", 0);
+    setenv("HOME",    "/",            0);
+    setenv("TMPDIR",  "/tmp",         0);
+    setenv("LANG",    "C",            0);
+    setenv("LC_ALL",  "C",            0);
+    setenv("TZ",      "UTC",          0);
+    setenv("TERM",    "vt100",        0);
+    setenv("USER",    "root",         0);
+    setenv("LOGNAME", "root",         0);
+}
+
+/* ── locale stubs ─────────────────────────────────────────────── */
+/* ICU, HarfBuzz, and other libs call setlocale at init.
+   Always return "C" — no locale switching supported. */
+
+/* struct lconv defined in libc.h */
+
+char *setlocale(int category, const char *locale) {
+    (void)category; (void)locale;
+    return "C";
+}
+
+static struct lconv _lconv_C = {
+    ".", "", "", "", "", "", "", "", "", "",
+    127, 127, 127, 127, 127, 127, 127, 127,
+    127, 127, 127, 127, 127, 127
+};
+
+struct lconv *localeconv(void) {
+    return &_lconv_C;
+}

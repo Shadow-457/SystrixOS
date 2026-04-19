@@ -61,15 +61,19 @@ i64 sys_execve(const char *path, char **argv, char **envp) {
     (void)argv; (void)envp;
     PCB *pcb = process_current_pcb();
     if (!pcb) return (i64)EFAULT;
-    void *elf_data = sys_malloc(65536);
-    if (!elf_data) return (i64)ENOMEM;
     const char *fname = path;
     while (*fname == '/') fname++;
     char name83[12];
     format_83_name(fname, name83);
     i64 fd = vfs_open(name83);
-    if (fd < 0) { sys_free(elf_data); return fd; }
-    i64 sz = vfs_read(fd, elf_data, 65536);
+    if (fd < 0) return fd;
+    /* get real file size via seek-to-end */
+    i64 file_sz = vfs_seek((u64)fd, 0, 2);
+    if (file_sz <= 0) { vfs_close(fd); return (i64)ENOENT; }
+    vfs_seek((u64)fd, 0, 0); /* rewind */
+    void *elf_data = sys_malloc((usize)file_sz);
+    if (!elf_data) { vfs_close(fd); return (i64)ENOMEM; }
+    i64 sz = vfs_read(fd, elf_data, (usize)file_sz);
     vfs_close(fd);
     if (sz <= 0) { sys_free(elf_data); return (i64)ENOENT; }
     Elf64Hdr *eh = (Elf64Hdr*)elf_data;

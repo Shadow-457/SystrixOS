@@ -480,51 +480,10 @@ static void write_dir_entry_in(u8 *entry32, u32 dir_clus) {
     }
 }
 
-/* Read one RTC CMOS register (BCD -> binary) */
-static u8 rtc_read_reg(u8 reg) {
-    outb(0x70, reg);
-    u8 v = inb(0x71);
-    return (u8)(((v >> 4) * 10) + (v & 0xF));  /* BCD to binary */
-}
-
-/* Build FAT16 date word: bits [15:9]=year-1980, [8:5]=month, [4:0]=day */
-static u16 fat_date_now(void) {
-    u8 year  = rtc_read_reg(0x09);   /* 0-99, assume 2000+ */
-    u8 month = rtc_read_reg(0x08);
-    u8 day   = rtc_read_reg(0x07);
-    if (month < 1)  month = 1;
-    if (month > 12) month = 12;
-    if (day   < 1)  day   = 1;
-    if (day   > 31) day   = 31;
-    u32 yr1980 = (u32)(2000 + year) - 1980;
-    return (u16)((yr1980 << 9) | ((u32)month << 5) | day);
-}
-
-/* Build FAT16 time word: bits [15:11]=hour, [10:5]=min, [4:0]=sec/2 */
-static u16 fat_time_now(void) {
-    u8 hour = rtc_read_reg(0x04);
-    u8 min  = rtc_read_reg(0x02);
-    u8 sec  = rtc_read_reg(0x00);
-    return (u16)(((u32)hour << 11) | ((u32)min << 5) | (sec >> 1));
-}
-
 void fat32_create_file_in(const char *name83, u32 dir_clus) {
     u8 de[32]; memset(de, 0, 32);
     memcpy(de, name83, 11);
     de[11] = 0x20; /* Archive */
-    /* Stamp creation and modified date/time from RTC */
-    u16 fdate = fat_date_now();
-    u16 ftime = fat_time_now();
-    /* Creation time: bytes 14-15, creation date: bytes 16-17 */
-    de[14] = (u8)(ftime);
-    de[15] = (u8)(ftime >> 8);
-    de[16] = (u8)(fdate);
-    de[17] = (u8)(fdate >> 8);
-    /* Last modified time: bytes 22-23, last modified date: bytes 24-25 */
-    de[22] = (u8)(ftime);
-    de[23] = (u8)(ftime >> 8);
-    de[24] = (u8)(fdate);
-    de[25] = (u8)(fdate >> 8);
     write_dir_entry_in(de, dir_clus);
 }
 void fat32_create_file(const char *name83) {
@@ -1547,7 +1506,7 @@ static void cmd_head(const char *arg) {
     if (fd < 0) { print_str("head: file not found\r\n"); return; }
     int lc = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = vfs_read((u64)fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n && lc < lines; i++) {
             vga_putchar(cat_buf[i]);
@@ -1555,7 +1514,7 @@ static void cmd_head(const char *arg) {
         }
         if (lc >= lines) break;
     }
-    fat32_vfs_close((u64)fd);
+    vfs_close((u64)fd);
     print_str("\r\n");
 }
 
@@ -1574,15 +1533,15 @@ static void cmd_tail(const char *arg) {
 
     /* read full file */
     u8 *buf = (u8*)heap_malloc(32768);
-    if (!buf) { fat32_vfs_close((u64)fd); print_str("OOM\r\n"); return; }
+    if (!buf) { vfs_close((u64)fd); print_str("OOM\r\n"); return; }
     usize total = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, buf + total, 512);
+        i64 n = vfs_read((u64)fd, buf + total, 512);
         if (n <= 0) break;
         total += (usize)n;
         if (total >= 32768 - 512) break;
     }
-    fat32_vfs_close((u64)fd);
+    vfs_close((u64)fd);
 
     /* find start of last N lines */
     int lc = 0;
@@ -1612,12 +1571,12 @@ static void cmd_append(const char *arg) {
     usize tlen = strlen(text);
     usize written = 0;
     while (written < tlen) {
-        i64 n = fat32_vfs_write((u64)fd, text + written, tlen - written);
+        i64 n = vfs_write((u64)fd, text + written, tlen - written);
         if (n <= 0) break;
         written += (usize)n;
     }
-    fat32_vfs_write((u64)fd, "\r\n", 2);
-    fat32_vfs_close((u64)fd);
+    vfs_write((u64)fd, "\r\n", 2);
+    vfs_close((u64)fd);
     print_str("Appended.\r\n");
 }
 
@@ -1698,7 +1657,7 @@ static void cmd_wc(const char *name) {
     u32 lines = 0, words = 0, bytes = 0;
     int in_word = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = vfs_read((u64)fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n; i++) {
             u8 c = cat_buf[i];
@@ -1708,7 +1667,7 @@ static void cmd_wc(const char *name) {
             else if (!in_word) { in_word = 1; words++; }
         }
     }
-    fat32_vfs_close((u64)fd);
+    vfs_close((u64)fd);
     print_u32(lines); print_str(" lines  ");
     print_u32(words); print_str(" words  ");
     print_u32(bytes); print_str(" bytes\r\n");
@@ -1728,17 +1687,17 @@ static void cmd_cp(const char *arg) {
     if (fat32_find_file_in(dst83, &dummy, cwd_active()) < 0)
         fat32_create_file_in(dst83, cwd_active());
     i64 fd_out = vfs_open_in(dst83, cwd_active());
-    if (fd_out < 0) { fat32_vfs_close((u64)fd_in); print_str("cp: cannot create dest\r\n"); return; }
+    if (fd_out < 0) { vfs_close((u64)fd_in); print_str("cp: cannot create dest\r\n"); return; }
 
     static u8 cp_buf[512];
     u32 total = 0;
     i64 n;
-    while ((n = fat32_vfs_read((u64)fd_in, cp_buf, sizeof(cp_buf))) > 0) {
-        fat32_vfs_write((u64)fd_out, cp_buf, (usize)n);
+    while ((n = vfs_read((u64)fd_in, cp_buf, sizeof(cp_buf))) > 0) {
+        vfs_write((u64)fd_out, cp_buf, (usize)n);
         total += (u32)n;
     }
-    fat32_vfs_close((u64)fd_in);
-    fat32_vfs_close((u64)fd_out);
+    vfs_close((u64)fd_in);
+    vfs_close((u64)fd_out);
     print_str("Copied "); print_size_human(total); print_str("\r\n");
 }
 
@@ -1748,12 +1707,12 @@ static void cmd_cat(const char *name) {
     i64 fd = vfs_open_in(name83, cwd_active());
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = vfs_read((u64)fd, cat_buf, 512);
         if (n <= 0) break;
         cat_buf[n] = 0;
         print_str((char*)cat_buf);
     }
-    fat32_vfs_close((u64)fd); print_str("\r\n");
+    vfs_close((u64)fd); print_str("\r\n");
 }
 
 static void cmd_hexdump(const char *name) {
@@ -1762,7 +1721,7 @@ static void cmd_hexdump(const char *name) {
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     int col = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = vfs_read((u64)fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n; i++) {
             print_hex_byte(cat_buf[i]); vga_putchar(' ');
@@ -1770,7 +1729,7 @@ static void cmd_hexdump(const char *name) {
         }
     }
     if (col) print_str("\r\n");
-    fat32_vfs_close((u64)fd);
+    vfs_close((u64)fd);
 }
 
 static void cmd_touch(const char *name) {
@@ -1814,12 +1773,12 @@ static void cmd_write(const char *arg) {
     usize tlen = strlen(text);
     usize written = 0;
     while (written < tlen) {
-        i64 n = fat32_vfs_write((u64)fd, text + written, tlen - written);
+        i64 n = vfs_write((u64)fd, text + written, tlen - written);
         if (n <= 0) break;
         written += (usize)n;
     }
-    fat32_vfs_write((u64)fd, "\r\n", 2);
-    fat32_vfs_close((u64)fd);
+    vfs_write((u64)fd, "\r\n", 2);
+    vfs_close((u64)fd);
     print_str("Written.\r\n");
 }
 
@@ -1898,8 +1857,8 @@ static void cmd_wget(const char *arg) {
         fat32_create_file_in(name83, cwd_active());
         i64 fd = vfs_open_in(name83, cwd_active());
         if (fd >= 0) {
-            fat32_vfs_write((u64)fd, dl_buf, (usize)n);
-            fat32_vfs_close((u64)fd);
+            vfs_write((u64)fd, dl_buf, (usize)n);
+            vfs_close((u64)fd);
             print_str("Saved to "); print_str(out_s); print_str("\r\n");
         }
     }
@@ -1910,10 +1869,10 @@ static void cmd_run(const char *name) {
     i64 fd = vfs_open_in(name83, cwd_active());
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     void *buf = heap_malloc(524288);
-    if (!buf) { fat32_vfs_close((u64)fd); print_str("OOM.\r\n"); return; }
+    if (!buf) { vfs_close((u64)fd); print_str("OOM.\r\n"); return; }
     usize total = 0;
-    for (;;) { i64 n = fat32_vfs_read((u64)fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
-    fat32_vfs_close((u64)fd);
+    for (;;) { i64 n = vfs_read((u64)fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
+    vfs_close((u64)fd);
     i64 pid = process_create((u64)buf, name);
     heap_free(buf);
     if (pid < 0) { print_str("Process create failed.\r\n"); return; }
@@ -2108,10 +2067,10 @@ static void cmd_elf(const char *name) {
     i64 fd = vfs_open_in(name83, cwd_active());
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     void *buf = heap_malloc(524288);
-    if (!buf) { fat32_vfs_close((u64)fd); print_str("OOM.\r\n"); return; }
+    if (!buf) { vfs_close((u64)fd); print_str("OOM.\r\n"); return; }
     usize total = 0;
-    for (;;) { i64 n = fat32_vfs_read((u64)fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
-    fat32_vfs_close((u64)fd);
+    for (;;) { i64 n = vfs_read((u64)fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
+    vfs_close((u64)fd);
     i64 pid = elf_load(buf, total, name);
     heap_free(buf);
     if (pid < 0) { print_str("Bad ELF.\r\n"); return; }
