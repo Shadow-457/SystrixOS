@@ -175,7 +175,12 @@ static int g_desktop_icon_cnt = 0;
 static ContextMenu g_ctx_menu = {0};
 static AppLauncher g_launcher = {0};
 
+static int g_net_status = 0;
+static int g_volume_level = 75;
 static int g_clock_ticks = 0;
+static int g_clock_sec = 0;
+static int g_clock_min = 0;
+static int g_clock_hour = 0;
 static int g_dirty = 0;           /* 1 = full redraw needed next frame */
 static u64 g_last_drag_redraw = 0;   /* pit_ticks of last drag repaint */
 static int g_desktop_dirty = 1;      /* skip desktop repaint when clean */
@@ -198,7 +203,7 @@ static void draw_desktop(void);
 static void draw_desktop_icons(void);
 static void draw_context_menu(void);
 static void draw_app_launcher(void);
-
+static void draw_system_tray(void);
 static void gui_redraw_window(int id);
 void gui_open_about(void);
 static void gui_redraw_drag(int id);
@@ -1200,6 +1205,34 @@ static void draw_app_launcher(void){
     }
 }
 
+static void draw_system_tray(void){
+    int tray_y=(MENUBAR_H-GLYPH_H)/2;
+    int tray_x=SCR_W-200;
+
+    /* Network */
+    fb_fill_rounded_rect(tray_x,tray_y,18,18,g_net_status?C_NET_ON:C_NET_OFF);
+    if(g_net_status){fb_draw_hline(tray_x+5,tray_y+6,8,C_BASE);fb_draw_hline(tray_x+6,tray_y+9,6,C_BASE);fb_draw_hline(tray_x+7,tray_y+12,4,C_BASE);}
+    else{fb_draw_line(tray_x+5,tray_y+5,tray_x+13,tray_y+13,C_BASE);}
+
+    /* Volume */
+    int vol_x=tray_x+26;
+    u32 vol_color=g_volume_level>60?C_VOL_HIGH:(g_volume_level>30?C_VOL_MED:C_VOL_LOW);
+    fb_fill_rounded_rect(vol_x,tray_y,18,18,vol_color);
+    fb_put_pixel(vol_x+4,tray_y+8,C_BASE);fb_put_pixel(vol_x+5,tray_y+7,C_BASE);fb_put_pixel(vol_x+5,tray_y+9,C_BASE);
+    fb_put_pixel(vol_x+6,tray_y+6,C_BASE);fb_put_pixel(vol_x+6,tray_y+10,C_BASE);
+    fb_fill_rect(vol_x+7,tray_y+6,2,8,C_BASE);
+    if(g_volume_level>30)fb_draw_hline(vol_x+10,tray_y+7,2,C_BASE);
+    if(g_volume_level>60)fb_draw_hline(vol_x+13,tray_y+6,2,C_BASE);
+
+    /* Clock */
+    int clock_x=vol_x+26;
+    char time_str[12];
+    int h=g_clock_hour,m=g_clock_min,s=g_clock_sec;
+    time_str[0]='0'+h/10;time_str[1]='0'+h%10;time_str[2]=':';
+    time_str[3]='0'+m/10;time_str[4]='0'+m%10;time_str[5]=':';
+    time_str[6]='0'+s/10;time_str[7]='0'+s%10;time_str[8]='\0';
+    draw_text(clock_x,tray_y,time_str,C_TEXT_DIM,1,0);
+}
 
 static unsigned int g_star_seed=0x5EED1234;
 static unsigned int star_rand(void){g_star_seed^=g_star_seed<<13;g_star_seed^=g_star_seed>>17;g_star_seed^=g_star_seed<<5;return g_star_seed;}
@@ -1321,6 +1354,30 @@ static void draw_desktop(void){
 
     draw_desktop_icons();
 
+    /* Menu bar */
+    fill_gradient_v(0,0,SCR_W,MENUBAR_H,C_MENUBAR_BG,0x100c06);
+    fb_draw_hline(0,MENUBAR_H-1,SCR_W,C_MENUBAR_SEP);
+    fb_draw_hline(0,MENUBAR_H,SCR_W,blend_color(C_MENUBAR_SEP,0xffffff,8));
+    int my=(MENUBAR_H-GLYPH_H)/2;
+
+    /* Menu button */
+    fb_fill_rounded_rect(4,my-2,44,GLYPH_H+4,blend_color(C_ACCENT,C_BASE,30));
+    fb_draw_rounded_rect(4,my-2,44,GLYPH_H+4,C_ACCENT_DIM);
+    draw_text_c(4,my,44,"Menu",C_ACCENT,1,0);
+
+    /* Logo */
+    int logo_x=54;
+    draw_text(logo_x,my,"ENGINE",C_ACCENT,1,0);
+    int vbx=logo_x+text_w("ENGINE")+10,vbw=text_w("v0.2")+10;
+    fb_fill_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,blend_color(C_ACCENT,C_BASE,30));
+    fb_draw_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,C_ACCENT_DIM);
+    draw_text(vbx+5,my,"v0.2",C_ACCENT,1,0);
+
+    int mmx=vbx+vbw+30;
+    const char*menus[]={"File","Edit","View","Help",0};
+    for(int i=0;menus[i];i++){draw_text(mmx,my,menus[i],C_TEXT_MID,1,0);mmx+=text_w(menus[i])+24;}
+
+    draw_system_tray();
     draw_app_launcher();
     draw_context_menu();
 }
