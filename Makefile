@@ -50,6 +50,7 @@ KERNEL_C_OBJS = \
     kernel/ipc.o       \
     kernel/input.o     \
     kernel/usb_hid.o   \
+    kernel/usb.o       \
     kernel/gfx.o       \
     kernel/sound.o     \
     kernel/resilience.o \
@@ -70,6 +71,7 @@ KERNEL_C_OBJS = \
     kernel/acpi.o      \
     kernel/pci.o       \
     kernel/ahci.o      \
+    kernel/nvme.o      \
     kernel/ps2.o       \
     kernel/e1000.o     \
     kernel/shell.o     \

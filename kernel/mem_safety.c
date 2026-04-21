@@ -116,43 +116,19 @@ void mem_safety_dump_leaks(void) {
         if (!alloc_table[i].freed) {
             leak_count++;
             leak_bytes += alloc_table[i].size;
-
-            print_str("  LEAK ");
-            /* Print address in hex */
-            u64 v = alloc_table[i].addr;
-            for (int j = 48; j >= 0; j -= 4) {
-                u8 nibble = (v >> j) & 0xF;
-                vga_putchar(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
-            }
-            print_str(" size=");
-            char buf[32]; int pos = 0;
-            u64 sz = alloc_table[i].size;
-            if (sz == 0) buf[pos++] = '0';
-            else { while (sz) { buf[pos++] = '0' + (sz % 10); sz /= 10; } }
-            for (int j = pos-1; j >= 0; j--) vga_putchar(buf[j]);
-            print_str(" tag=");
-            print_str(alloc_table[i].tag);
-            print_str("\r\n");
+            char buf[80];
+            ksnprintf(buf, sizeof(buf), "  LEAK %016llx size=%llu tag=%s\r\n",
+                      (unsigned long long)alloc_table[i].addr,
+                      (unsigned long long)alloc_table[i].size,
+                      alloc_table[i].tag);
+            print_str(buf);
         }
     }
 
-    print_str("Total leaks: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = leak_count;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" (");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = leak_bytes;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" bytes)\r\n");
+    { char buf[64];
+      ksnprintf(buf, sizeof(buf), "Total leaks: %u (%llu bytes)\r\n",
+                leak_count, (unsigned long long)leak_bytes);
+      print_str(buf); }
     print_str("===========================\r\n");
 }
 
@@ -300,13 +276,10 @@ int mem_safety_validate_free(void *ptr) {
 
     /* Check for double-free */
     if (mem_safety_is_freed(addr)) {
-        print_str("[SAFETY] Double free detected at ");
-        u64 v = addr;
-        for (int j = 48; j >= 0; j -= 4) {
-            u8 nibble = (v >> j) & 0xF;
-            vga_putchar(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
-        }
-        print_str("\r\n");
+        char buf[48];
+        ksnprintf(buf, sizeof(buf), "[SAFETY] Double free detected at %016llx\r\n",
+                  (unsigned long long)addr);
+        print_str(buf);
         return 0;
     }
 
@@ -402,30 +375,15 @@ void mem_safety_init(void) {
 void mem_safety_print_stats(void) {
     if (!SAFETY_ENABLED) return;
 
-    print_str("\n=== Memory Safety Stats ===\r\n");
-    print_str("Tracked allocations: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = alloc_count;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nQuarantine entries: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = quarantine_count;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nTick counter: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = tick_counter;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\n==========================\r\n");
+    char buf[96];
+    ksnprintf(buf, sizeof(buf),
+              "\n=== Memory Safety Stats ===\r\n"
+              "Tracked allocations: %llu\r\n"
+              "Quarantine entries:  %llu\r\n"
+              "Tick counter:        %llu\r\n"
+              "==========================\r\n",
+              (unsigned long long)alloc_count,
+              (unsigned long long)quarantine_count,
+              (unsigned long long)tick_counter);
+    print_str(buf);
 }

@@ -1,15 +1,17 @@
 /* ================================================================
- *  ENGINE OS — kernel/pmm.c  (v3: E820-aware, full RAM)
+ *  ENGINE OS — kernel/pmm.c  (v4: 64-bit physical memory, no 4 GB cap)
  *
- *  Same buddy allocator as v2, but now:
- *    - pmm_init() reads the E820 map written by boot.S at 0x0500
- *    - Feeds ALL usable RAM regions above RAM_START to the buddy
- *    - ram_end_actual is set to the highest usable byte so the rest
- *      of the kernel knows how much RAM is available
- *    - Supports up to 4 GB (u32 page indices x 4 KB = 4 GB)
+ *  Changes from v3:
+ *    - RAM_END_MAX raised to 64 GB in kernel.h
+ *    - page indices and total_pages are now u64 to handle >4 GB
+ *    - MAX_PAGES uses u64 arithmetic; buddy node pointers stay u32
+ *      (buddy links stored in the page itself, so 32-bit index is fine
+ *       up to 4 billion pages which far exceeds addressable RAM)
+ *    - phys_to_idx / idx_to_phys use u64 throughout
+ *    - pmm_free_pages returns u64
+ *    - Identity mapping in entry.S extended to 64 GB (see entry.S)
  *
- *  With 1 GB QEMU RAM: ~252 MB usable after kernel reservation.
- *  With 2 GB QEMU RAM: ~2044 MB usable.
+ *  With any QEMU RAM amount: meminfo now reports the real value.
  * ================================================================ */
 #include "../include/kernel.h"
 

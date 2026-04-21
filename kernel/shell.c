@@ -262,7 +262,16 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
         return 0;
     }
     if (strcmp(cmd->argv[0], "help") == 0) {
-        print_str("Commands: echo, cd, pwd, ls, cat, ps, ipc, export, env, help, exit\r\n");
+        print_str("Commands: echo, cd, pwd, ls, cat, ps, ipc, export, env,\r\n");
+        print_str("          lspci, lsusb, help, exit\r\n");
+        return 0;
+    }
+    if (strcmp(cmd->argv[0], "lspci") == 0) {
+        pci_list_devices();
+        return 0;
+    }
+    if (strcmp(cmd->argv[0], "lsusb") == 0) {
+        usb_list_devices();
         return 0;
     }
     if (strcmp(cmd->argv[0], "ipc") == 0) {
@@ -279,17 +288,26 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
         print_str("\r\n");
         return (i64)ENOENT;
     }
-    char *data = (char*)sys_malloc(65536);
+    /* Get real file size: seek to end, then seek back to start */
+    i64 sz = vfs_seek(fd, 0, 2); /* SEEK_END */
+    if (sz <= 0) { vfs_close(fd); return (i64)ENOENT; }
+    vfs_seek(fd, 0, 0); /* SEEK_SET */
+    char *data = (char*)sys_malloc((usize)sz);
     if (!data) { vfs_close(fd); return (i64)ENOMEM; }
-    i64 sz = vfs_read(fd, data, 65536);
+    sz = vfs_read(fd, data, (usize)sz);
     vfs_close(fd);
     if (sz <= 0) { sys_free(data); return (i64)ENOENT; }
     Elf64Hdr *eh = (Elf64Hdr*)data;
     if (eh->magic != ELF_MAGIC) { sys_free(data); return (i64)EINVAL; }
-    i64 pid = process_create(eh->entry, cmd->argv[0]);
+    /* elf_load() creates the process, maps all PT_LOAD segments and
+     * the user stack into its own CR3, then returns the pid.
+     * process_create() alone only allocates a PCB — it never maps
+     * the ELF segments, so the process would fault the moment it
+     * tried to execute its first instruction. */
+    i64 pid = elf_load(data, (usize)sz, cmd->argv[0]);
     sys_free(data);
     if (pid < 0) return pid;
-    process_run(pid);
+    process_run((u64)pid);
     return pid;
 }
 

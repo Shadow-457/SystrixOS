@@ -528,62 +528,27 @@ void heap_print_stats(void) {
     print_str("Slab Caches:\r\n");
     for (u32 c = 0; c < SLAB_NUM_CLASSES; c++) {
         if (slab_class_stats[c].slab_pages > 0) {
-            print_str("  Size ");
-            char buf[32]; int pos = 0;
-            u64 v = slab_sizes[c];
-            if (v == 0) buf[pos++] = '0';
-            else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-            for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-            print_str(": ");
-            pos = 0;
-            v = slab_class_stats[c].active_objects;
-            if (v == 0) buf[pos++] = '0';
-            else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-            for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-            print_str(" active, ");
-            pos = 0;
-            v = slab_class_stats[c].slab_pages;
-            if (v == 0) buf[pos++] = '0';
-            else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-            for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-            print_str(" pages\r\n");
+            char buf[64];
+            ksnprintf(buf, sizeof(buf), "  Size %llu: %llu active, %llu pages\r\n",
+                      (unsigned long long)slab_sizes[c],
+                      (unsigned long long)slab_class_stats[c].active_objects,
+                      (unsigned long long)slab_class_stats[c].slab_pages);
+            print_str(buf);
         }
     }
 
-    print_str("Block Heap:\r\n");
-    print_str("  Total: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = HEAP_SIZE;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" bytes\r\n  Used: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = block_total_used;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" bytes\r\n  Free: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = block_total_free;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" bytes\r\n  Peak: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = block_peak_used;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" bytes\r\n");
+    { char buf[128];
+      ksnprintf(buf, sizeof(buf),
+                "Block Heap:\r\n"
+                "  Total: %llu bytes\r\n"
+                "  Used:  %llu bytes\r\n"
+                "  Free:  %llu bytes\r\n"
+                "  Peak:  %llu bytes\r\n",
+                (unsigned long long)HEAP_SIZE,
+                (unsigned long long)block_total_used,
+                (unsigned long long)block_total_free,
+                (unsigned long long)block_peak_used);
+      print_str(buf); }
     print_str("=======================\r\n");
 }
 

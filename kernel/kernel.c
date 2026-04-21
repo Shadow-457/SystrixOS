@@ -839,6 +839,220 @@ i64 fat32_rename(const char *old83, const char *new83) {
 }
 
 /* ================================================================
+ *  FAT32 VFS OPS — bridge inode_ops_t → raw fat32 layer
+ *  inode->ino holds the cluster number (root = fat32_root_clus).
+ *  inode->fs_data holds a heap-allocated FD for open files.
+ * ================================================================ */
+
+/* Convert long name to 8.3: pad with spaces, upper-case, dot stripped. */
+static void to_83(const char *name, char out[11]) {
+    memset(out, ' ', 11);
+    int i = 0, j = 0;
+    while (name[i] && name[i] != '.' && j < 8) {
+        char c = name[i++];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+        out[j++] = c;
+    }
+    while (name[i] && name[i] != '.') i++; /* skip rest of base */
+    if (name[i] == '.') {
+        i++;
+        int k = 8;
+        while (name[i] && k < 11) {
+            char c = name[i++];
+            if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+            out[k++] = c;
+        }
+    }
+}
+
+static i64 fat32_ops_read(struct vfs_inode *inode, void *buf, usize count, usize offset) {
+    FD *f = (FD*)inode->fs_data;
+    if (!f) return (i64)EINVAL;
+    /* Seek to requested offset if needed */
+    if (f->pos != (u32)offset) {
+        u32 clus_bytes = (u32)fat32_spc * 512;
+        u32 target_idx = (u32)offset / clus_bytes;
+        u32 clus = f->start_clus;
+        for (u32 i = 0; i < target_idx && clus < 0x0FFFFFF8; i++)
+            clus = fat32_next_cluster(clus);
+        f->cur_clus = clus;
+        f->pos      = (u32)offset;
+    }
+    usize done = 0;
+    while (done < count) {
+        i64 n = fat32_read_raw(f, (u8*)buf + done, count - done);
+        if (n <= 0) break;
+        done += (usize)n;
+    }
+    return (i64)done;
+}
+
+static i64 fat32_ops_write(struct vfs_inode *inode, const void *buf, usize count, usize offset) {
+    FD *f = (FD*)inode->fs_data;
+    if (!f) return (i64)EINVAL;
+    if (f->pos != (u32)offset) {
+        u32 clus_bytes = (u32)fat32_spc * 512;
+        u32 target_idx = (u32)offset / clus_bytes;
+        u32 clus = f->start_clus ? f->start_clus : fat32_root_clus;
+        for (u32 i = 0; i < target_idx && clus < 0x0FFFFFF8; i++)
+            clus = fat32_next_cluster(clus);
+        f->cur_clus = clus;
+        f->pos      = (u32)offset;
+    }
+    usize done = 0;
+    while (done < count) {
+        i64 n = fat32_write_raw(f, (const u8*)buf + done, count - done);
+        if (n <= 0) break;
+        done += (usize)n;
+    }
+    inode->attr.size = f->size;
+    return (i64)done;
+}
+
+/* dir_buf already defined as file-static above; use a local buffer here */
+static i64 fat32_ops_readdir(struct vfs_inode *inode, void *buf, usize count, usize *offset) {
+    u32 clus = (u32)inode->ino;
+    usize written = 0;
+    u8 tmp[32];
+    while (clus < 0x0FFFFFF8 && written + 64 <= count) {
+        u32 lba = cluster_to_lba(clus);
+        for (u8 s = 0; s < fat32_spc; s++) {
+            ata_read_sector(lba + s, dir_buf);
+            for (int e = 0; e < 16; e++) {
+                u8 *de = dir_buf + e * 32;
+                if (de[0] == 0) goto rdone;
+                if (de[0] == 0xE5) continue;
+                if (de[11] & 0x08) continue; /* volume label */
+                if (de[11] & 0x10) continue; /* skip subdirs for now */
+                if (written + 64 > count) goto rdone;
+                memset(tmp, 0, 64);
+                /* Copy 8.3 name, strip trailing spaces */
+                int ni = 0;
+                for (int k = 0; k < 8 && de[k] != ' '; k++) tmp[ni++] = de[k];
+                if (de[8] != ' ') {
+                    tmp[ni++] = '.';
+                    for (int k = 8; k < 11 && de[k] != ' '; k++) tmp[ni++] = de[k];
+                }
+                memcpy((u8*)buf + written, tmp, 64);
+                written += 64;
+            }
+        }
+        clus = fat32_next_cluster(clus);
+    }
+    rdone:
+    *offset += written;
+    return (i64)written;
+}
+
+static i64 fat32_ops_lookup(struct vfs_inode *dir_inode, const char *name, struct vfs_inode *out) {
+    char n83[11];
+    to_83(name, n83);
+    u32 dir_clus = (u32)dir_inode->ino;
+    u32 out_clus, out_size;
+    i64 r = fat32_find_raw_in(n83, &out_clus, &out_size, dir_clus);
+    if (r < 0) return (i64)ENOENT;
+    /* Allocate an FD for this file */
+    FD *f = (FD*)heap_malloc(sizeof(FD));
+    if (!f) return (i64)ENOMEM;
+    memset(f, 0, sizeof(FD));
+    f->in_use    = 1;
+    f->size      = out_size;
+    f->start_clus= out_clus;
+    f->cur_clus  = out_clus;
+    f->pos       = 0;
+    f->dir_clus  = dir_clus;
+    memcpy(f->name83, n83, 11);
+    out->valid    = 1;
+    out->ino      = out_clus;
+    out->dev      = dir_inode->dev;
+    out->rdev     = 0;
+    out->refcount = 1;
+    out->ops      = dir_inode->ops;
+    out->fs_data  = f;
+    out->mount    = dir_inode->mount;
+    out->attr.type    = 1; /* IT_FILE */
+    out->attr.mode    = 0644;
+    out->attr.uid     = 0;
+    out->attr.gid     = 0;
+    out->attr.size    = out_size;
+    out->attr.nlink   = 1;
+    out->attr.blksize = 512;
+    out->attr.blocks  = (out_size + 511) / 512;
+    return 0;
+}
+
+static i64 fat32_ops_create(struct vfs_inode *dir_inode, const char *name, u16 mode, struct vfs_inode *out) {
+    char n83[11];
+    to_83(name, n83);
+    u32 dir_clus = (u32)dir_inode->ino;
+    fat32_create_file_in(n83, dir_clus);
+    return fat32_ops_lookup(dir_inode, name, out);
+}
+
+static i64 fat32_ops_mkdir(struct vfs_inode *dir_inode, const char *name, u16 mode) {
+    char n83[11];
+    to_83(name, n83);
+    u32 c = fat32_alloc_cluster();
+    if (c == (u32)-1) return (i64)ENOSPC;
+    fat32_create_dir_entry_in(n83, c, (u32)dir_inode->ino);
+    return 0;
+}
+
+static i64 fat32_ops_unlink(struct vfs_inode *dir_inode, const char *name) {
+    char n83[11];
+    to_83(name, n83);
+    i64 r = fat32_delete_file_in(n83, (u32)dir_inode->ino);
+    return r < 0 ? (i64)ENOENT : 0;
+}
+
+static i64 fat32_ops_getsize(struct vfs_inode *inode) {
+    FD *f = (FD*)inode->fs_data;
+    return f ? (i64)f->size : (i64)inode->attr.size;
+}
+
+static i64 fat32_ops_setattr(struct vfs_inode *inode, inode_attr_t *attr) {
+    inode->attr = *attr;
+    return 0;
+}
+
+static inode_ops_t fat32_inode_ops = {
+    .read    = fat32_ops_read,
+    .write   = fat32_ops_write,
+    .readdir = fat32_ops_readdir,
+    .lookup  = fat32_ops_lookup,
+    .create  = fat32_ops_create,
+    .mkdir   = fat32_ops_mkdir,
+    .unlink  = fat32_ops_unlink,
+    .rmdir   = fat32_ops_unlink,
+    .setattr = fat32_ops_setattr,
+    .getsize = fat32_ops_getsize,
+};
+
+/* Call after fat32_init(). Mounts FAT32 root at "/" in the new VFS layer. */
+void vfs_register_fat32(void) {
+    FD *root_fd = (FD*)heap_malloc(sizeof(FD));
+    if (!root_fd) return;
+    memset(root_fd, 0, sizeof(FD));
+    root_fd->in_use    = 1;
+    root_fd->start_clus= fat32_root_clus;
+    root_fd->cur_clus  = fat32_root_clus;
+    root_fd->dir_clus  = fat32_root_clus;
+    vfs_inode_t root;
+    memset(&root, 0, sizeof(root));
+    root.valid    = 1;
+    root.ino      = fat32_root_clus;
+    root.dev      = 1;
+    root.refcount = 1;
+    root.ops      = &fat32_inode_ops;
+    root.fs_data  = root_fd;
+    root.attr.type    = 2; /* IT_DIR */
+    root.attr.mode    = 0755;
+    root.attr.nlink   = 1;
+    root.attr.blksize = 512;
+    vfs_mount_fs("/", "fat32", 1, &root);
+}
+
+/* ================================================================
  *  SHARED KEYBOARD SCANCODE TABLES
  *  Defined once here; used by read_key_raw(), read_key(), and the
  *  GUI event loop.  Previously each site had its own private copy,
@@ -1190,6 +1404,54 @@ static u8   cat_buf[513];
 static u32  cwd_clus = 0;
 static char cwd_path[128] = "/";
 
+/* ── Shell VFS helpers ──────────────────────────────────────────
+ * Build full path from cwd_path + name and call new VFS layer.
+ * sh_open  → vfs_open   (new abstracted VFS)
+ * sh_read  → vfs_read
+ * sh_write → vfs_write
+ * sh_close → vfs_close
+ * sh_create→ vfs_create (creates + opens)
+ * sh_unlink→ vfs_unlink
+ * sh_mkdir → vfs_mkdir
+ * ──────────────────────────────────────────────────────────────*/
+static void sh_fullpath(const char *name, char *out, usize outsz) {
+    if (name[0] == '/') {
+        /* absolute path — use as-is */
+        usize n = strlen(name);
+        if (n >= outsz) n = outsz - 1;
+        memcpy(out, name, n);
+        out[n] = 0;
+        return;
+    }
+    usize clen = strlen(cwd_path);
+    usize nlen = strlen(name);
+    if (clen + 1 + nlen + 1 > outsz) { out[0] = 0; return; }
+    memcpy(out, cwd_path, clen);
+    if (cwd_path[clen - 1] != '/') out[clen++] = '/';
+    memcpy(out + clen, name, nlen + 1);
+}
+
+static i64 sh_open(const char *name) {
+    char p[256]; sh_fullpath(name, p, sizeof(p));
+    return vfs_open(p);
+}
+static i64 sh_create(const char *name, u16 mode) {
+    char p[256]; sh_fullpath(name, p, sizeof(p));
+    return vfs_create(p, mode);
+}
+static i64 sh_unlink(const char *name) {
+    char p[256]; sh_fullpath(name, p, sizeof(p));
+    return vfs_unlink(p);
+}
+static i64 sh_mkdir(const char *name, u16 mode) {
+    char p[256]; sh_fullpath(name, p, sizeof(p));
+    return vfs_mkdir(p, mode);
+}
+/* read/write/close are just vfs_read/write/close directly */
+#define sh_read(fd,buf,n)   vfs_read((u64)(fd),(buf),(n))
+#define sh_write(fd,buf,n)  vfs_write((u64)(fd),(buf),(n))
+#define sh_close(fd)        vfs_close((u64)(fd))
+
 /* Skip the first word in s, return pointer to start of next word (or NULL) */
 static const char *get_arg(const char *s) {
     while (*s && *s != ' ') s++;
@@ -1199,32 +1461,32 @@ static const char *get_arg(const char *s) {
 
 /* Print an unsigned 32-bit integer in decimal */
 static void print_u32(u32 n) {
-    if (n == 0) { vga_putchar('0'); return; }
-    char buf[10]; int i = 0;
-    while (n) { buf[i++] = '0' + (n % 10); n /= 10; }
-    while (i--) vga_putchar((u8)buf[i]);
+    char buf[12];
+    ksnprintf(buf, sizeof(buf), "%u", (unsigned)n);
+    print_str(buf);
 }
 
 /* Print size in human-readable form: B, KB, MB */
 static void print_size_human(u32 sz) {
-    if (sz < 1024) {
-        print_u32(sz); print_str(" B");
-    } else if (sz < 1024 * 1024) {
-        print_u32(sz / 1024); print_str(".");
-        print_u32((sz % 1024) * 10 / 1024); print_str(" KB");
-    } else {
-        print_u32(sz / (1024*1024)); print_str(".");
-        print_u32((sz % (1024*1024)) * 10 / (1024*1024)); print_str(" MB");
-    }
+    char buf[32];
+    if (sz < 1024)
+        ksnprintf(buf, sizeof(buf), "%u B", (unsigned)sz);
+    else if (sz < 1024 * 1024)
+        ksnprintf(buf, sizeof(buf), "%u.%u KB",
+                  (unsigned)(sz / 1024),
+                  (unsigned)((sz % 1024) * 10 / 1024));
+    else
+        ksnprintf(buf, sizeof(buf), "%u.%u MB",
+                  (unsigned)(sz / (1024*1024)),
+                  (unsigned)((sz % (1024*1024)) * 10 / (1024*1024)));
+    print_str(buf);
 }
 
 /* Print right-aligned decimal in `width` chars */
 static void print_u32_w(u32 n, int width) {
-    char buf[12]; int i = 0;
-    if (n == 0) buf[i++] = '0';
-    else { u32 t = n; while (t) { buf[i++] = '0' + (t % 10); t /= 10; } }
-    for (int k = i; k < width; k++) vga_putchar(' ');
-    while (i--) vga_putchar((u8)buf[i]);
+    char buf[32];
+    ksnprintf(buf, sizeof(buf), "%*u", width, (unsigned)n);
+    print_str(buf);
 }
 
 /* Active cluster for directory ops — root if cwd_clus == 0 */
@@ -1234,15 +1496,28 @@ static u32 cwd_active(void) {
 
 static void cmd_meminfo(void) {
     u32 free  = pmm_free_pages();
-    u32 total = (u32)TOTAL_PAGES;
-    u32 used  = total - free;
+    /* Use runtime ram_end_actual (from E820) — NOT the compile-time
+     * TOTAL_PAGES which always equals the 64 GB ceiling regardless of
+     * how much RAM QEMU was given.  This is why meminfo used to report
+     * 4 GB even when only 128 MB was configured. */
+    u64 actual_pages = (ram_end_actual > RAM_START)
+                       ? (ram_end_actual - RAM_START) / PAGE_SIZE : 0;
+    u64 total = actual_pages;
+    u64 used  = (total > free) ? (total - free) : 0;
+    /* Display in KB (page * 4) and MB for readability */
+    u64 total_mb = (total * 4) / 1024;
+    u64 used_mb  = (used  * 4) / 1024;
+    u64 free_mb  = (free  * 4ULL) / 1024;
     print_str("Memory (4 KB pages):\r\n");
-    print_str("  Total : "); print_u32(total); print_str(" pages (");
-    print_u32(total * 4); print_str(" KB)\r\n");
-    print_str("  Used  : "); print_u32(used);  print_str(" pages (");
-    print_u32(used  * 4); print_str(" KB)\r\n");
-    print_str("  Free  : "); print_u32(free);  print_str(" pages (");
-    print_u32(free  * 4); print_str(" KB)\r\n");
+    print_str("  Total : "); print_u32((u32)total);
+    print_str(" pages ("); print_u32((u32)total_mb); print_str(" MB)\r\n");
+    print_str("  Used  : "); print_u32((u32)used);
+    print_str(" pages ("); print_u32((u32)used_mb);  print_str(" MB)\r\n");
+    print_str("  Free  : "); print_u32(free);
+    print_str(" pages ("); print_u32((u32)free_mb);  print_str(" MB)\r\n");
+    print_str("  RAM ceiling (E820 high): ");
+    /* print ram_end_actual in MB */
+    print_u32((u32)(ram_end_actual / (1024*1024))); print_str(" MB\r\n");
 }
 
 static void cmd_uptime(void) {
@@ -1302,10 +1577,14 @@ static void cmd_ls(void) {
                 int is_dir = (attr & 0x10) ? 1 : 0;
 
                 /* print name, padded to 15 */
-                for (int k = 0; k < ni; k++) vga_putchar((u8)name[k]);
+                print_str(name);
                 if (is_dir) vga_putchar('/');
-                int pad = 15 - ni - is_dir;
-                for (int k = 0; k < pad; k++) vga_putchar(' ');
+                { char pad_buf[16];
+                  int used = ni + is_dir;
+                  int pad  = (used < 15) ? 15 - used : 0;
+                  for (int k = 0; k < pad; k++) pad_buf[k] = ' ';
+                  pad_buf[pad] = '\0';
+                  print_str(pad_buf); }
 
                 if (is_dir) {
                     print_str("<DIR>      ");
@@ -1325,8 +1604,8 @@ static void cmd_ls(void) {
     }
 ls_done:
     print_str("----           ----       ----\r\n");
-    print_u32(file_count); print_str(" file(s), ");
-    print_u32(dir_count);  print_str(" dir(s)   total: ");
+    { char fbuf[16]; ksnprintf(fbuf, sizeof(fbuf), "%d file(s), ", file_count); print_str(fbuf); }
+    { char dbuf[16]; ksnprintf(dbuf, sizeof(dbuf), "%d dir(s)   total: ", dir_count); print_str(dbuf); }
     print_size_human(total_bytes);
     print_str("\r\n");
 }
@@ -1368,10 +1647,8 @@ static void cmd_cd(const char *name) {
                 u32 lo = *(u16*)(de + 26);
                 cwd_clus = (hi << 16) | lo;
                 /* update path string */
-                int pl = 0; while (cwd_path[pl]) pl++;
-                if (cwd_path[pl-1] != '/') { cwd_path[pl] = '/'; pl++; }
-                for (int k = 0; name[k] && pl < 126; k++, pl++) cwd_path[pl] = name[k];
-                cwd_path[pl] = 0;
+                if (cwd_path[1] != '\0') strlcat(cwd_path, "/", sizeof(cwd_path));
+                strlcat(cwd_path, name, sizeof(cwd_path));
                 return;
             }
         }
@@ -1399,7 +1676,6 @@ static void cmd_stat(const char *name) {
                 for (int k = 0; k < 11; k++) if (de[k] != (u8)n83[k]) { match = 0; break; }
                 if (!match) continue;
 
-                /* found — print details */
                 print_str("File : "); print_str(name); print_str("\r\n");
                 print_str("Type : "); print_str((attr & 0x10) ? "Directory" : "File"); print_str("\r\n");
                 if (!(attr & 0x10)) {
@@ -1419,16 +1695,10 @@ static void cmd_stat(const char *name) {
                 u32 day   = cdate & 0x1F;
                 u32 hour  = (ctime >> 11) & 0x1F;
                 u32 min   = (ctime >> 5) & 0x3F;
-                print_str("Date : "); print_u32(year); print_str("-");
-                if (mon  < 10) vga_putchar('0');
-                print_u32(mon); print_str("-");
-                if (day  < 10) vga_putchar('0');
-                print_u32(day); print_str("  ");
-                if (hour < 10) vga_putchar('0');
-                print_u32(hour); print_str(":");
-                if (min  < 10) vga_putchar('0');
-                print_u32(min);
-                print_str("\r\n");
+                { char dbuf[32];
+                  ksnprintf(dbuf, sizeof(dbuf), "Date : %u-%02u-%02u  %02u:%02u\r\n",
+                            year, mon, day, hour, min);
+                  print_str(dbuf); }
                 u8 ro = (attr & 0x01) ? 1 : 0;
                 print_str("Attr : "); print_str(ro ? "read-only" : "read-write");
                 print_str("\r\n");
@@ -1543,11 +1813,11 @@ static void cmd_head(const char *arg) {
         if (!lines) lines = 10;
     }
     char n83[12]; format_83_name(arg, n83);
-    i64 fd = vfs_open_in(n83, cwd_active());
+    i64 fd = sh_open(n83);
     if (fd < 0) { print_str("head: file not found\r\n"); return; }
     int lc = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = sh_read(fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n && lc < lines; i++) {
             vga_putchar(cat_buf[i]);
@@ -1555,7 +1825,7 @@ static void cmd_head(const char *arg) {
         }
         if (lc >= lines) break;
     }
-    fat32_vfs_close((u64)fd);
+    sh_close(fd);
     print_str("\r\n");
 }
 
@@ -1569,20 +1839,20 @@ static void cmd_tail(const char *arg) {
         if (!lines) lines = 10;
     }
     char n83[12]; format_83_name(arg, n83);
-    i64 fd = vfs_open_in(n83, cwd_active());
+    i64 fd = sh_open(n83);
     if (fd < 0) { print_str("tail: file not found\r\n"); return; }
 
     /* read full file */
     u8 *buf = (u8*)heap_malloc(32768);
-    if (!buf) { fat32_vfs_close((u64)fd); print_str("OOM\r\n"); return; }
+    if (!buf) { sh_close(fd); print_str("OOM\r\n"); return; }
     usize total = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, buf + total, 512);
+        i64 n = sh_read(fd, buf + total, 512);
         if (n <= 0) break;
         total += (usize)n;
         if (total >= 32768 - 512) break;
     }
-    fat32_vfs_close((u64)fd);
+    sh_close(fd);
 
     /* find start of last N lines */
     int lc = 0;
@@ -1602,35 +1872,30 @@ static void cmd_append(const char *arg) {
     const char *text = get_arg(arg);
     if (!text) { print_str("Usage: append <file> <text>\r\n"); return; }
     char n83[12]; format_83_name(arg, n83);
-    u32 dummy;
-    if (fat32_find_file_in(n83, &dummy, cwd_active()) < 0)
-        fat32_create_file_in(n83, cwd_active());
-    i64 fd = vfs_open_in(n83, cwd_active());
+    i64 fd = sh_open(n83);
+    if (fd < 0) fd = sh_create(n83, 0644);
     if (fd < 0) { print_str("Error.\r\n"); return; }
-    FD *slot = &fd_table[fd];
-    slot->pos = slot->size;
+    i64 sz = vfs_seek((u64)fd, 0, 2); /* seek to end */
+    (void)sz;
     usize tlen = strlen(text);
     usize written = 0;
     while (written < tlen) {
-        i64 n = fat32_vfs_write((u64)fd, text + written, tlen - written);
+        i64 n = sh_write(fd, text + written, tlen - written);
         if (n <= 0) break;
         written += (usize)n;
     }
-    fat32_vfs_write((u64)fd, "\r\n", 2);
-    fat32_vfs_close((u64)fd);
+    sh_write(fd, "\r\n", 2);
+    sh_close(fd);
     print_str("Appended.\r\n");
 }
 
 /* ---- mkdir / rmdir --------------------------------------------- */
 static void cmd_mkdir(const char *name) {
-    u32 c = fat32_alloc_cluster();
-    if (c == (u32)-1) { print_str("mkdir: disk full\r\n"); return; }
-    u32 lba = cluster_to_lba(c);
-    u8 zbuf[512]; memset(zbuf, 0, 512);
-    for (u8 s = 0; s < fat32_spc; s++) ata_write_sector(lba + s, zbuf);
     char n83[12]; format_83_name(name, n83);
-    fat32_create_dir_entry_in(n83, c, cwd_active());
-    print_str("Directory created.\r\n");
+    if (sh_mkdir(n83, 0755) == 0)
+        print_str("Directory created.\r\n");
+    else
+        print_str("mkdir: failed\r\n");
 }
 
 static void cmd_rmdir(const char *name) {
@@ -1684,7 +1949,7 @@ rmdir_search_done:
     }
 rmdir_check_done:
     /* delete via fat32_delete_file (marks entry 0xE5, frees chain) */
-    if (fat32_delete_file_in(n83, cwd_active()) == 0)
+    if (sh_unlink(n83) == 0)
         print_str("Directory removed.\r\n");
     else
         print_str("rmdir: failed\r\n");
@@ -1693,12 +1958,12 @@ rmdir_check_done:
 /* ---- wc -------------------------------------------------------- */
 static void cmd_wc(const char *name) {
     char n83[12]; format_83_name(name, n83);
-    i64 fd = vfs_open_in(n83, cwd_active());
+    i64 fd = sh_open(n83);
     if (fd < 0) { print_str("wc: file not found\r\n"); return; }
     u32 lines = 0, words = 0, bytes = 0;
     int in_word = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = sh_read(fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n; i++) {
             u8 c = cat_buf[i];
@@ -1708,10 +1973,11 @@ static void cmd_wc(const char *name) {
             else if (!in_word) { in_word = 1; words++; }
         }
     }
-    fat32_vfs_close((u64)fd);
-    print_u32(lines); print_str(" lines  ");
-    print_u32(words); print_str(" words  ");
-    print_u32(bytes); print_str(" bytes\r\n");
+    sh_close(fd);
+    { char wbuf[48];
+      ksnprintf(wbuf, sizeof(wbuf), "%u lines  %u words  %u bytes\r\n",
+                lines, words, bytes);
+      print_str(wbuf); }
 }
 
 /* ---- cp -------------------------------------------------------- */
@@ -1722,47 +1988,45 @@ static void cmd_cp(const char *arg) {
     format_83_name(arg, src83);
     format_83_name(dst, dst83);
 
-    i64 fd_in = vfs_open_in(src83, cwd_active());
+    i64 fd_in = sh_open(src83);
     if (fd_in < 0) { print_str("cp: source not found\r\n"); return; }
-    u32 dummy;
-    if (fat32_find_file_in(dst83, &dummy, cwd_active()) < 0)
-        fat32_create_file_in(dst83, cwd_active());
-    i64 fd_out = vfs_open_in(dst83, cwd_active());
-    if (fd_out < 0) { fat32_vfs_close((u64)fd_in); print_str("cp: cannot create dest\r\n"); return; }
+    i64 fd_out = sh_open(dst83);
+    if (fd_out < 0) fd_out = sh_create(dst83, 0644);
+    if (fd_out < 0) { sh_close(fd_in); print_str("cp: cannot create dest\r\n"); return; }
 
     static u8 cp_buf[512];
     u32 total = 0;
     i64 n;
-    while ((n = fat32_vfs_read((u64)fd_in, cp_buf, sizeof(cp_buf))) > 0) {
-        fat32_vfs_write((u64)fd_out, cp_buf, (usize)n);
+    while ((n = sh_read(fd_in, cp_buf, sizeof(cp_buf))) > 0) {
+        sh_write(fd_out, cp_buf, (usize)n);
         total += (u32)n;
     }
-    fat32_vfs_close((u64)fd_in);
-    fat32_vfs_close((u64)fd_out);
+    sh_close(fd_in);
+    sh_close(fd_out);
     print_str("Copied "); print_size_human(total); print_str("\r\n");
 }
 
 /* ---- cat / hexdump / touch / rm / rename / write (unchanged) --- */
 static void cmd_cat(const char *name) {
     format_83_name(name, name83);
-    i64 fd = vfs_open_in(name83, cwd_active());
+    i64 fd = sh_open(name83);
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = sh_read(fd, cat_buf, 512);
         if (n <= 0) break;
         cat_buf[n] = 0;
         print_str((char*)cat_buf);
     }
-    fat32_vfs_close((u64)fd); print_str("\r\n");
+    sh_close(fd); print_str("\r\n");
 }
 
 static void cmd_hexdump(const char *name) {
     format_83_name(name, name83);
-    i64 fd = vfs_open_in(name83, cwd_active());
+    i64 fd = sh_open(name83);
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     int col = 0;
     for (;;) {
-        i64 n = fat32_vfs_read((u64)fd, cat_buf, 512);
+        i64 n = sh_read(fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n; i++) {
             print_hex_byte(cat_buf[i]); vga_putchar(' ');
@@ -1770,21 +2034,21 @@ static void cmd_hexdump(const char *name) {
         }
     }
     if (col) print_str("\r\n");
-    fat32_vfs_close((u64)fd);
+    sh_close(fd);
 }
 
 static void cmd_touch(const char *name) {
     format_83_name(name, name83);
-    u32 dummy;
-    if (fat32_find_file_in(name83, &dummy, cwd_active()) == 0)
-        { print_str("(exists)\r\n"); return; }
-    fat32_create_file_in(name83, cwd_active());
+    i64 fd = sh_open(name83);
+    if (fd >= 0) { sh_close(fd); print_str("(exists)\r\n"); return; }
+    fd = sh_create(name83, 0644);
+    if (fd >= 0) sh_close(fd);
     print_str("File created.\r\n");
 }
 
 static void cmd_rm(const char *name) {
     format_83_name(name, name83);
-    if (fat32_delete_file_in(name83, cwd_active()) == 0)
+    if (sh_unlink(name83) == 0)
         print_str("File deleted.\r\n");
     else
         print_str("File not found.\r\n");
@@ -1796,6 +2060,10 @@ static void cmd_rename(const char *arg) {
     char old83[12], new83[12];
     format_83_name(arg, old83);
     format_83_name(dst, new83);
+    char oldp[256], newp[256];
+    sh_fullpath(old83, oldp, sizeof(oldp));
+    sh_fullpath(new83, newp, sizeof(newp));
+    /* Derive dir cluster from path for FAT32 rename */
     if (fat32_rename_in(old83, new83, cwd_active()) == 0)
         print_str("Renamed.\r\n");
     else
@@ -1806,20 +2074,18 @@ static void cmd_write(const char *arg) {
     const char *text = get_arg(arg);
     if (!text) { print_str("Usage: write <file> <text>\r\n"); return; }
     format_83_name(arg, name83);
-    u32 tmp;
-    if (fat32_find_file_in(name83, &tmp, cwd_active()) != 0)
-        fat32_create_file_in(name83, cwd_active());
-    i64 fd = vfs_open_in(name83, cwd_active());
+    i64 fd = sh_open(name83);
+    if (fd < 0) fd = sh_create(name83, 0644);
     if (fd < 0) { print_str("Error.\r\n"); return; }
     usize tlen = strlen(text);
     usize written = 0;
     while (written < tlen) {
-        i64 n = fat32_vfs_write((u64)fd, text + written, tlen - written);
+        i64 n = sh_write(fd, text + written, tlen - written);
         if (n <= 0) break;
         written += (usize)n;
     }
-    fat32_vfs_write((u64)fd, "\r\n", 2);
-    fat32_vfs_close((u64)fd);
+    sh_write(fd, "\r\n", 2);
+    sh_close(fd);
     print_str("Written.\r\n");
 }
 
@@ -1838,10 +2104,9 @@ static u32 parse_ip(const char *s) {
 }
 
 static void print_int(int v) {
-    char buf[12]; int i=0;
-    if (!v) { vga_putchar('0'); return; }
-    while (v) { buf[i++] = (char)('0' + v%10); v /= 10; }
-    while (i--) vga_putchar((u8)buf[i]);
+    char buf[12];
+    ksnprintf(buf, sizeof(buf), "%d", v);
+    print_str(buf);
 }
 
 static void cmd_ifconfig(void) {
@@ -1872,14 +2137,22 @@ static void cmd_ping(const char *arg) {
 
 static void cmd_wget(const char *arg) {
     if (!arg) { print_str("Usage: wget <ip> <path> <outfile>\r\n"); return; }
-    char ip_s[32]={0}, path_s[128]={0}, out_s[16]={0};
-    int field=0; usize j=0;
-    for (const char *p=arg; *p; p++) {
-        if (*p==' ') { field++; j=0; continue; }
-        if (field==0 && j<31)  ip_s[j++]   = *p;
-        if (field==1 && j<127) path_s[j++] = *p;
-        if (field==2 && j<15)  out_s[j++]  = *p;
+
+    /* split "ip_str path outfile" by spaces using strchr */
+    char ip_s[32] = {0}, path_s[128] = {0}, out_s[16] = {0};
+    const char *p1 = strchr(arg, ' ');
+    if (!p1) { print_str("Usage: wget <ip> <path> <outfile>\r\n"); return; }
+    strlcpy(ip_s,   arg,  MIN((usize)(p1 - arg) + 1, sizeof(ip_s)));
+    while (*p1 == ' ') p1++;
+    const char *p2 = strchr(p1, ' ');
+    if (p2) {
+        strlcpy(path_s, p1, MIN((usize)(p2 - p1) + 1, sizeof(path_s)));
+        while (*p2 == ' ') p2++;
+        strlcpy(out_s,  p2, sizeof(out_s));
+    } else {
+        strlcpy(path_s, p1, sizeof(path_s));
     }
+
     if (!ip_s[0] || !path_s[0]) {
         print_str("Usage: wget <ip> <path> <outfile>\r\n"); return;
     }
@@ -1895,11 +2168,11 @@ static void cmd_wget(const char *arg) {
     if (out_s[0]) {
         char name83[12];
         format_83_name(out_s, name83);
-        fat32_create_file_in(name83, cwd_active());
-        i64 fd = vfs_open_in(name83, cwd_active());
+        i64 fd = sh_open(name83);
+        if (fd < 0) fd = sh_create(name83, 0644);
         if (fd >= 0) {
-            fat32_vfs_write((u64)fd, dl_buf, (usize)n);
-            fat32_vfs_close((u64)fd);
+            sh_write(fd, dl_buf, (usize)n);
+            sh_close(fd);
             print_str("Saved to "); print_str(out_s); print_str("\r\n");
         }
     }
@@ -1907,13 +2180,13 @@ static void cmd_wget(const char *arg) {
 
 static void cmd_run(const char *name) {
     format_83_name(name, name83);
-    i64 fd = vfs_open_in(name83, cwd_active());
+    i64 fd = sh_open(name83);
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     void *buf = heap_malloc(524288);
-    if (!buf) { fat32_vfs_close((u64)fd); print_str("OOM.\r\n"); return; }
+    if (!buf) { sh_close(fd); print_str("OOM.\r\n"); return; }
     usize total = 0;
-    for (;;) { i64 n = fat32_vfs_read((u64)fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
-    fat32_vfs_close((u64)fd);
+    for (;;) { i64 n = sh_read(fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
+    sh_close(fd);
     i64 pid = process_create((u64)buf, name);
     heap_free(buf);
     if (pid < 0) { print_str("Process create failed.\r\n"); return; }
@@ -2075,7 +2348,7 @@ static void cmd_gui(void) {
         }
         watchdog_pet();   /* GUI is alive — prevent watchdog firing */
         ps2_poll();       /* drain i8042 keyboard + mouse bytes */
-        usb_hid_poll();
+        usb_full_poll();
         __asm__ volatile("hlt");
     }
     gui_exit:;
@@ -2105,13 +2378,13 @@ static void cmd_shc_info(void) {
 
 static void cmd_elf(const char *name) {
     format_83_name(name, name83);
-    i64 fd = vfs_open_in(name83, cwd_active());
+    i64 fd = sh_open(name83);
     if (fd < 0) { print_str("File not found.\r\n"); return; }
     void *buf = heap_malloc(524288);
-    if (!buf) { fat32_vfs_close((u64)fd); print_str("OOM.\r\n"); return; }
+    if (!buf) { sh_close(fd); print_str("OOM.\r\n"); return; }
     usize total = 0;
-    for (;;) { i64 n = fat32_vfs_read((u64)fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
-    fat32_vfs_close((u64)fd);
+    for (;;) { i64 n = sh_read(fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
+    sh_close(fd);
     i64 pid = elf_load(buf, total, name);
     heap_free(buf);
     if (pid < 0) { print_str("Bad ELF.\r\n"); return; }
@@ -2234,8 +2507,7 @@ static void exec_cmd(void) {
         u16 port = 4444;
         if (arg) { port = 0; for (const char *p=arg; *p>='0'&&*p<='9'; p++) port=(u16)(port*10+(*p-'0')); }
         if (!net_tcp_listen(port)) { print_str("netcat: bind failed\r\n"); return; }
-        print_str("netcat: waiting on port "); { char pb[8]; int pi=0; u16 tmp=port; if(!tmp){pb[pi++]='0';} else {while(tmp){pb[pi++]='0'+tmp%10;tmp/=10;}} for(int i=pi-1;i>=0;i--) vga_putchar((u8)pb[i]); }
-        print_str(" (any key to cancel)\r\n");
+        { char pb[40]; ksnprintf(pb, sizeof(pb), "netcat: waiting on port %u (any key to cancel)\r\n", (unsigned)port); print_str(pb); }
         TcpConn *c = NULL;
         for (;;) { net_poll(); if (inb(0x64)&1){inb(0x60);net_tcp_unlisten(port);return;} c=net_tcp_accept_nb(port); if(c) break; for(volatile int _d=0;_d<5000;_d++) __asm__ volatile("pause"); }
         print_str("netcat: connected\r\n");
@@ -2271,18 +2543,46 @@ void kernel_main(void) {
 
     vfs_init();
     fat32_init();
+    vfs_core_init();       /* zero inode/mount/fd tables for new VFS layer */
+    jfs_init();            /* init JFS on second partition */
+    vfs_register_fat32();  /* mount FAT32 at /    via inode_ops_t */
+    vfs_register_jfs();    /* mount JFS   at /jfs via inode_ops_t */
     net_start();          /* init e1000, run DHCP */
 
     /* Drain any stale i8042 bytes that accumulated during network init.
      * Without this, DHCP broadcast packets can cause phantom keypresses. */
     { int t = 1000; while ((inb(0x64) & 1) && --t) inb(0x60); }
 
+    pci_scan_all();           /* enumerate all PCI devices — must run first */
+
+    /* ── AHCI SATA (class 0x01, subclass 0x06, prog-if 0x01) ── */
+    {
+        void *ahci_dev = pci_find_class_progif(0x01, 0x06, 0x01);
+        if (ahci_dev) {
+            u32 bar5 = (u32)pci_bar_base(ahci_dev, 5);
+            ahci_init(bar5);
+        } else {
+            print_str("[AHCI] no SATA controller found\r\n");
+        }
+    }
+
+    /* ── NVMe (class 0x01, subclass 0x08, prog-if 0x02) ── */
+    {
+        void *nvme_dev = pci_find_class_progif(0x01, 0x08, 0x02);
+        if (nvme_dev) {
+            u64 bar0 = pci_bar_base(nvme_dev, 0);
+            nvme_init(bar0);
+        } else {
+            print_str("[NVMe] no NVMe controller found\r\n");
+        }
+    }
+
     ps2_init();               /* full i8042 controller init — KB + mouse */
     kbd_init_dummy();         /* polled I/O — no keyboard init needed */
     mouse_ready = ps2_mouse_ok();
     if (mouse_ready) ps2_mouse_refresh();
     scheduler_start();    /* STI — timer fires from here */
-    usb_hid_init();       /* USB HID XHCI — supplements PS/2 */
+    usb_full_init();      /* EHCI + XHCI full enumeration + mass storage */
 
     smp_init();
     watchdog_init();

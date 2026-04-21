@@ -26,10 +26,14 @@ typedef u64                usize;
 #define RAM_START     0x400000UL
 
 /* RAM_END is set at runtime from E820 — use ram_end_actual.
- * RAM_END_MAX is the compile-time ceiling for static array sizing. */
-#define RAM_END_MAX   0x100000000UL  /* 4 GB ceiling */
-extern u64 ram_end_actual;           /* set by pmm_init()            */
+ * RAM_END_MAX is the compile-time ceiling for static array sizing.
+ * Raised to 64 GB so the buddy bitmap and refcount arrays cover the
+ * full 64-bit physical address space seen in practice on x86-64. */
+#define RAM_END_MAX   0x1000000000UL  /* 64 GB ceiling (64-bit) */
+extern u64 ram_end_actual;            /* set by pmm_init()           */
 #define RAM_END       ram_end_actual
+/* TOTAL_PAGES: compile-time upper bound for static sizing only.
+ * Use (ram_end_actual - RAM_START) / PAGE_SIZE for runtime counts. */
 #define TOTAL_PAGES   ((RAM_END_MAX - RAM_START) / PAGE_SIZE)
 
 /* ── E820 BIOS memory map ────────────────────────────────────── */
@@ -104,6 +108,67 @@ typedef struct {
 typedef struct vfs_inode vfs_inode_t;
 typedef struct vfs_mount vfs_mount_t;
 typedef struct vfs_fd vfs_fd_t;
+
+/* ── VFS core types (shared by vfs.c, kernel.c, jfs.c) ─────── */
+
+typedef struct {
+    u32 uid;
+    u32 gid;
+    u16 mode;
+    u16 type;
+    u64 size;
+    u64 ino;
+    u64 nlink;
+    u64 atime;
+    u64 mtime;
+    u64 ctime;
+    u32 dev;
+    u32 rdev;
+    u64 blocks;
+    u64 blksize;
+} inode_attr_t;
+
+typedef struct inode_ops {
+    i64 (*read)(struct vfs_inode *inode, void *buf, usize count, usize offset);
+    i64 (*write)(struct vfs_inode *inode, const void *buf, usize count, usize offset);
+    i64 (*readdir)(struct vfs_inode *inode, void *buf, usize count, usize *offset);
+    i64 (*lookup)(struct vfs_inode *dir, const char *name, struct vfs_inode *out);
+    i64 (*create)(struct vfs_inode *dir, const char *name, u16 mode, struct vfs_inode *out);
+    i64 (*mkdir)(struct vfs_inode *dir, const char *name, u16 mode);
+    i64 (*unlink)(struct vfs_inode *dir, const char *name);
+    i64 (*rmdir)(struct vfs_inode *dir, const char *name);
+    i64 (*setattr)(struct vfs_inode *inode, inode_attr_t *attr);
+    i64 (*getsize)(struct vfs_inode *inode);
+} inode_ops_t;
+
+struct vfs_inode {
+    u8 valid;
+    u64 ino;
+    u32 dev;
+    u32 rdev;
+    u32 refcount;
+    inode_attr_t attr;
+    inode_ops_t *ops;
+    void *fs_data;
+    struct vfs_mount *mount;
+};
+
+struct vfs_mount {
+    u8 valid;
+    char path[256];
+    u32 dev;
+    vfs_inode_t root;
+    const char *fstype;
+};
+
+struct vfs_fd {
+    u8 in_use;
+    vfs_inode_t *inode;
+    usize offset;
+    u32 flags;
+    int type;
+    void *pipe_data;
+};
 
 /* Signal types */
 #define SIG_DFL ((void*)0)
@@ -505,8 +570,18 @@ int   fb_get_width(void);
 int   fb_get_height(void);
 
 /* USB HID keyboard/mouse (kernel/usb_hid.c) */
-void  usb_hid_init(void);     /* call once from kernel_main after pci_scan */
-void  usb_hid_poll(void);     /* call from event loops to push USB events */
+void  usb_hid_init(void);     /* legacy stub — superseded by usb_full_init */
+void  usb_hid_poll(void);     /* legacy stub */
+
+/* kernel/usb.c — full USB stack (EHCI + XHCI + mass storage) */
+void  usb_full_init(void);    /* call after pci_scan_all */
+void  usb_full_poll(void);    /* call from event/idle loop */
+void  usb_list_devices(void); /* lsusb shell command helper */
+int   usb_msc_read(int dev_idx, u64 lba, u32 count, void *buf);
+int   usb_msc_write(int dev_idx, u64 lba, u32 count, void *buf);
+int   usb_msc_count(void);
+u64   usb_msc_block_count(int idx);
+u32   usb_msc_block_size(int idx);
 int   fb_get_bpp(void);
 u8   *fb_get_ptr(void);
 u64   fb_get_phys(void);
@@ -812,6 +887,8 @@ i64  jfs_read(u32 ino, void *buf, usize count, usize offset);
 i64  jfs_unlink(u32 ino);
 i64  jfs_mkdir(const char *name, u16 mode);
 void jfs_journal_flush(void);
+void vfs_register_jfs(void);   /* mount JFS at /jfs via inode_ops_t */
+void vfs_register_fat32(void); /* mount FAT32 at /     via inode_ops_t */
 
 /* TCP/IP */
 void socket_init(void);
@@ -846,6 +923,9 @@ u32  acpi_get_ioapic_gsi_base(void);
 /* PCI */
 u32  pci_read32(u8 bus, u8 slot, u8 fn, u16 off);
 void pci_write32(u8 bus, u8 slot, u8 fn, u16 off, u32 v);
+u16  pci_read16(u8 bus, u8 slot, u8 fn, u16 off);
+void pci_write16(u8 bus, u8 slot, u8 fn, u16 off, u16 v);
+u8   pci_read8 (u8 bus, u8 slot, u8 fn, u16 off);
 void pci_scan_all(void);
 void pci_enable_device(void *dev);
 void pci_enable_bus_master(void *dev);
@@ -861,11 +941,28 @@ u8   pci_irq(void *dev);
 void pci_set_ecam(u64 base, u8 start_bus);
 
 /* AHCI */
-void ahci_init(u32 bar);
-i64  ahci_read_sector(int port_idx, u32 lba, void *buf);
-i64  ahci_write_sector(int port_idx, u32 lba, const void *buf);
-i64  ahci_identify(int port_idx, void *buf);
-int  ahci_get_port_count(void);
+/* ── AHCI SATA driver (ahci.c) ─────────────────────────────── */
+void        ahci_init(u32 bar);
+i64         ahci_read_sector(int port, u32 lba, void *buf);
+i64         ahci_read_sectors(int port, u64 lba, u16 count, void *buf);
+i64         ahci_write_sector(int port, u32 lba, const void *buf);
+i64         ahci_write_sectors(int port, u64 lba, u16 count, const void *buf);
+i64         ahci_flush(int port);
+i64         ahci_identify(int port, void *buf);
+int         ahci_get_port_count(void);
+u64         ahci_get_sector_count(int port);
+const char *ahci_get_model(int port);
+
+/* ── NVMe driver (nvme.c) ──────────────────────────────────── */
+void nvme_init(u64 bar);
+i64  nvme_read_sector(u64 lba, void *buf);
+i64  nvme_write_sector(u64 lba, const void *buf);
+i64  nvme_read_4k(u64 lba, void *buf);
+i64  nvme_write_4k(u64 lba, const void *buf);
+i64  nvme_flush(void);
+int  nvme_ready(void);
+u64  nvme_sector_count(void);
+u32  nvme_lba_size(void);
 
 /* PS/2 keyboard + mouse (i8042) */
 void ps2_init(void);
@@ -1032,6 +1129,17 @@ static inline void cli(void)  { __asm__ volatile("cli"); }
 static inline void hlt(void)  { __asm__ volatile("hlt"); }
 static inline void io_wait(void) { outb(0x80, 0); }
 
+/* ── Common utility macros ───────────────────────────────────── */
+#define MIN(a, b)         ((a) < (b) ? (a) : (b))
+#define MAX(a, b)         ((a) > (b) ? (a) : (b))
+#define CLAMP(v, lo, hi)  ((v) < (lo) ? (lo) : (v) > (hi) ? (hi) : (v))
+#define ARRAY_SIZE(a)     (sizeof(a) / sizeof((a)[0]))
+#define ALIGN_UP(v, a)    (((v) + (a) - 1) & ~((a) - 1))
+#define ALIGN_DOWN(v, a)  ((v) & ~((a) - 1))
+#define BIT(n)            (1UL << (n))
+#define IS_POWER_OF_2(n)  ((n) && !((n) & ((n) - 1)))
+#define UNUSED(x)         ((void)(x))
+
 /* ── Memory utilities ────────────────────────────────────────── */
 static inline void memset(void *dst, u8 val, usize n) {
     u8 *p = (u8*)dst;
@@ -1041,6 +1149,28 @@ static inline void memcpy(void *dst, const void *src, usize n) {
     u8 *d = (u8*)dst; const u8 *s = (const u8*)src;
     for (usize i = 0; i < n; i++) d[i] = s[i];
 }
+/* memmove: safe even when src and dst overlap */
+static inline void memmove(void *dst, const void *src, usize n) {
+    u8 *d = (u8*)dst; const u8 *s = (const u8*)src;
+    if (d < s || d >= s + n)
+        for (usize i = 0; i < n; i++) d[i] = s[i];
+    else
+        for (usize i = n; i-- > 0;) d[i] = s[i];
+}
+static inline int memcmp(const void *a, const void *b, usize n) {
+    const u8 *p = (const u8*)a, *q = (const u8*)b;
+    for (usize i = 0; i < n; i++)
+        if (p[i] != q[i]) return (int)p[i] - (int)q[i];
+    return 0;
+}
+static inline void *memchr(const void *s, u8 c, usize n) {
+    const u8 *p = (const u8*)s;
+    for (usize i = 0; i < n; i++)
+        if (p[i] == c) return (void*)(p + i);
+    return NULL;
+}
+
+/* ── String utilities ────────────────────────────────────────── */
 static inline usize strlen(const char *s) {
     usize n = 0; while (s[n]) n++; return n;
 }
@@ -1051,6 +1181,196 @@ static inline int strcmp(const char *a, const char *b) {
 static inline int strncmp(const char *a, const char *b, usize n) {
     while (n-- && *a && *a == *b) { a++; b++; }
     return n == (usize)-1 ? 0 : (u8)*a - (u8)*b;
+}
+static inline char *strcpy(char *dst, const char *src) {
+    char *d = dst;
+    while ((*d++ = *src++)) {}
+    return dst;
+}
+static inline char *strncpy(char *dst, const char *src, usize n) {
+    usize i;
+    for (i = 0; i < n && src[i]; i++) dst[i] = src[i];
+    for (; i < n; i++) dst[i] = '\0';
+    return dst;
+}
+/* strlcpy: always NUL-terminates, returns strlen(src) */
+static inline usize strlcpy(char *dst, const char *src, usize sz) {
+    usize i = 0;
+    if (sz > 0) {
+        for (; i < sz - 1 && src[i]; i++) dst[i] = src[i];
+        dst[i] = '\0';
+    }
+    while (src[i]) i++;
+    return i;
+}
+static inline char *strcat(char *dst, const char *src) {
+    char *d = dst;
+    while (*d) d++;
+    while ((*d++ = *src++)) {}
+    return dst;
+}
+/* strlcat: safe bounded concatenation, returns total length */
+static inline usize strlcat(char *dst, const char *src, usize sz) {
+    usize dl = 0;
+    while (dl < sz && dst[dl]) dl++;
+    usize sl = 0;
+    while (dl + sl + 1 < sz && src[sl]) { dst[dl + sl] = src[sl]; sl++; }
+    if (dl < sz) dst[dl + sl] = '\0';
+    while (src[sl]) sl++;
+    return dl + sl;
+}
+static inline char *strchr(const char *s, int c) {
+    for (; *s; s++)
+        if ((u8)*s == (u8)c) return (char*)s;
+    return (c == '\0') ? (char*)s : NULL;
+}
+static inline char *strrchr(const char *s, int c) {
+    const char *last = NULL;
+    for (; *s; s++)
+        if ((u8)*s == (u8)c) last = s;
+    return (char*)last;
+}
+static inline char *strstr(const char *hay, const char *needle) {
+    if (!*needle) return (char*)hay;
+    for (; *hay; hay++) {
+        const char *h = hay, *n = needle;
+        while (*h && *n && *h == *n) { h++; n++; }
+        if (!*n) return (char*)hay;
+    }
+    return NULL;
+}
+
+/* ── Integer conversion ──────────────────────────────────────── */
+static inline int atoi(const char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    int neg = (*s == '-'); if (neg || *s == '+') s++;
+    int v = 0;
+    while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');
+    return neg ? -v : v;
+}
+static inline long strtol(const char *s, char **end, int base) {
+    while (*s == ' ' || *s == '\t') s++;
+    int neg = (*s == '-'); if (neg || *s == '+') s++;
+    if (base == 0) {
+        if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+        else if (s[0] == '0') { base = 8; s++; }
+        else base = 10;
+    } else if (base == 16 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+    long v = 0;
+    for (;;) {
+        int d;
+        if (*s >= '0' && *s <= '9') d = *s - '0';
+        else if (*s >= 'a' && *s <= 'z') d = *s - 'a' + 10;
+        else if (*s >= 'A' && *s <= 'Z') d = *s - 'A' + 10;
+        else break;
+        if (d >= base) break;
+        v = v * base + d; s++;
+    }
+    if (end) *end = (char*)s;
+    return neg ? -v : v;
+}
+static inline unsigned long strtoul(const char *s, char **end, int base) {
+    return (unsigned long)strtol(s, end, base);
+}
+
+/* ── snprintf / sprintf (kernel-only, no FP support) ─────────── *
+ * Supported: %d %i %u %x %X %o %c %s %p %%                      *
+ * Width (e.g. %5d), left-justify (%-5d), zero-pad (%05d).        */
+static inline int k_vsnprintf(char *buf, usize sz, const char *fmt, __builtin_va_list ap) {
+    usize pos = 0;
+#define _PUTC(c) do { if (pos + 1 < sz) buf[pos++] = (c); } while (0)
+    while (*fmt) {
+        if (*fmt != '%') { _PUTC(*fmt++); continue; }
+        fmt++;
+        /* flags */
+        int left = 0, zero = 0;
+        while (*fmt == '-' || *fmt == '0') {
+            if (*fmt == '-') left = 1; else zero = 1; fmt++;
+        }
+        /* width */
+        int width = 0;
+        while (*fmt >= '0' && *fmt <= '9') width = width * 10 + (*fmt++ - '0');
+        /* length modifier */
+        int lng = 0;
+        if (*fmt == 'l') { lng = 1; fmt++; if (*fmt == 'l') { lng = 2; fmt++; } }
+        char spec = *fmt++;
+        if (spec == '%') { _PUTC('%'); continue; }
+        if (spec == 'c') { _PUTC((char)__builtin_va_arg(ap, int)); continue; }
+        if (spec == 's') {
+            const char *sv = __builtin_va_arg(ap, const char*);
+            if (!sv) sv = "(null)";
+            int sl = 0; while (sv[sl]) sl++;
+            if (!left) for (int i = sl; i < width; i++) _PUTC(' ');
+            for (int i = 0; sv[i]; i++) _PUTC(sv[i]);
+            if (left)  for (int i = sl; i < width; i++) _PUTC(' ');
+            continue;
+        }
+        /* numeric */
+        u64 uval; int neg = 0;
+        if (spec == 'd' || spec == 'i') {
+            i64 sv = (lng == 2) ? __builtin_va_arg(ap, long long)
+                   : (lng == 1) ? __builtin_va_arg(ap, long)
+                                : __builtin_va_arg(ap, int);
+            if (sv < 0) { neg = 1; uval = (u64)(-sv); } else uval = (u64)sv;
+        } else if (spec == 'p') {
+            uval = (u64)(usize)__builtin_va_arg(ap, void*);
+            spec = 'x'; /* treat as hex */
+        } else {
+            uval = (lng == 2) ? __builtin_va_arg(ap, unsigned long long)
+                 : (lng == 1) ? __builtin_va_arg(ap, unsigned long)
+                              : __builtin_va_arg(ap, unsigned int);
+        }
+        unsigned int base = (spec == 'x' || spec == 'X') ? 16
+                          : (spec == 'o') ? 8 : 10;
+        const char *digs = (spec == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+        char tmp[24]; int tlen = 0;
+        if (uval == 0) { tmp[tlen++] = '0'; }
+        else { u64 v = uval; while (v) { tmp[tlen++] = digs[v % base]; v /= base; } }
+        if (neg) tmp[tlen++] = '-';
+        char pad = (zero && !left) ? '0' : ' ';
+        int total = tlen + (spec == 'p' ? 2 : 0);
+        if (!left) for (int i = total; i < width; i++) _PUTC(pad);
+        if (spec == 'p') { _PUTC('0'); _PUTC('x'); }
+        for (int i = tlen - 1; i >= 0; i--) _PUTC(tmp[i]);
+        if (left)  for (int i = total; i < width; i++) _PUTC(' ');
+    }
+#undef _PUTC
+    if (sz) buf[pos < sz ? pos : sz - 1] = '\0';
+    return (int)pos;
+}
+static inline int ksnprintf(char *buf, usize sz, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+static inline int ksnprintf(char *buf, usize sz, const char *fmt, ...) {
+    __builtin_va_list ap; __builtin_va_start(ap, fmt);
+    int r = k_vsnprintf(buf, sz, fmt, ap);
+    __builtin_va_end(ap);
+    return r;
+}
+static inline int ksprintf(char *buf, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+static inline int ksprintf(char *buf, const char *fmt, ...) {
+    __builtin_va_list ap; __builtin_va_start(ap, fmt);
+    int r = k_vsnprintf(buf, (usize)-1, fmt, ap);
+    __builtin_va_end(ap);
+    return r;
+}
+
+/* ── Integer helpers ─────────────────────────────────────────── */
+/* u64_to_str: write decimal digits into buf (must be ≥20 bytes); returns length */
+static inline int u64_to_dec(u64 v, char *buf) {
+    if (v == 0) { buf[0] = '0'; buf[1] = '\0'; return 1; }
+    char tmp[20]; int n = 0;
+    while (v) { tmp[n++] = (char)('0' + v % 10); v /= 10; }
+    for (int i = 0; i < n; i++) buf[i] = tmp[n - 1 - i];
+    buf[n] = '\0'; return n;
+}
+static inline int u64_to_hex(u64 v, char *buf) {
+    if (v == 0) { buf[0] = '0'; buf[1] = '\0'; return 1; }
+    const char *d = "0123456789abcdef";
+    char tmp[16]; int n = 0;
+    while (v) { tmp[n++] = d[v & 0xF]; v >>= 4; }
+    for (int i = 0; i < n; i++) buf[i] = tmp[n - 1 - i];
+    buf[n] = '\0'; return n;
 }
 
 /* ── poll / epoll structs ──────────────────────────────────────── */

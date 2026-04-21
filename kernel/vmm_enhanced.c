@@ -378,40 +378,19 @@ int vmm_is_huge_page(u64 cr3, u64 virt) {
 
 /* ---- Print huge page statistics ------------------------------- */
 void vmm_huge_page_stats(void) {
-    print_str("\n=== Huge Page Statistics ===\r\n");
-    print_str("Allocations: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = huge_page_allocs;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nFrees: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = huge_page_frees;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nCurrent: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = huge_page_current;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nTransparent promotions: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = huge_page_promoted;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\n============================\r\n");
+    char buf[128];
+    ksnprintf(buf, sizeof(buf),
+              "\n=== Huge Page Statistics ===\r\n"
+              "Allocations:            %llu\r\n"
+              "Frees:                  %llu\r\n"
+              "Current:                %llu\r\n"
+              "Transparent promotions: %llu\r\n"
+              "============================\r\n",
+              (unsigned long long)huge_page_allocs,
+              (unsigned long long)huge_page_frees,
+              (unsigned long long)huge_page_current,
+              (unsigned long long)huge_page_promoted);
+    print_str(buf);
 }
 
 /* ================================================================

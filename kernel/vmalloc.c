@@ -268,66 +268,30 @@ u64 vmalloc_to_phys(void *addr) {
 
 /* ---- Print vmalloc statistics --------------------------------- */
 void vmalloc_print_stats(void) {
-    print_str("\n=== Vmalloc Statistics ===\r\n");
-    print_str("Total size: 256 MB\r\n");
-    print_str("Allocated pages: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = vmalloc_allocated_pages;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" (");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = vmalloc_allocated_pages * 4;  /* KB */
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str(" KB)\r\nPeak pages: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = vmalloc_peak_pages;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nTotal allocations: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = vmalloc_total_allocs;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nTotal frees: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = vmalloc_total_frees;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\n\r\nTracked allocations:\r\n");
+    { char buf[160];
+      ksnprintf(buf, sizeof(buf),
+                "\n=== Vmalloc Statistics ===\r\n"
+                "Total size:        256 MB\r\n"
+                "Allocated pages:   %llu (%llu KB)\r\n"
+                "Peak pages:        %llu\r\n"
+                "Total allocations: %llu\r\n"
+                "Total frees:       %llu\r\n\r\n"
+                "Tracked allocations:\r\n",
+                (unsigned long long)vmalloc_allocated_pages,
+                (unsigned long long)vmalloc_allocated_pages * 4,
+                (unsigned long long)vmalloc_peak_pages,
+                (unsigned long long)vmalloc_total_allocs,
+                (unsigned long long)vmalloc_total_frees);
+      print_str(buf); }
+
     for (u32 i = 0; i < vmalloc_track_count; i++) {
         VmallocEntry *e = &vmalloc_tracking[i];
-        print_str("  ");
-        print_str(e->tag);
-        print_str(": ");
-        char buf[32]; int pos = 0;
-        u64 v = e->pages;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int j = pos-1; j >= 0; j--) vga_putchar(buf[j]);
-        print_str(" pages (");
-        pos = 0;
-        v = e->pages * 4;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int j = pos-1; j >= 0; j--) vga_putchar(buf[j]);
-        print_str(" KB)\r\n");
+        char buf[64];
+        ksnprintf(buf, sizeof(buf), "  %s: %llu pages (%llu KB)\r\n",
+                  e->tag,
+                  (unsigned long long)e->pages,
+                  (unsigned long long)e->pages * 4);
+        print_str(buf);
     }
     print_str("==========================\r\n");
 }
@@ -342,22 +306,12 @@ void vmalloc_dump_leaks(void) {
     print_str("[VMALLOC] Tracked allocations (potential leaks):\r\n");
     for (u32 i = 0; i < vmalloc_track_count; i++) {
         VmallocEntry *e = &vmalloc_tracking[i];
-        print_str("  VA=");
-        /* Print hex address */
-        u64 v = e->virt;
-        for (int j = 60; j >= 0; j -= 4) {
-            u8 nibble = (v >> j) & 0xF;
-            vga_putchar(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
-        }
-        print_str(" size=");
-        char buf[32]; int pos = 0;
-        u64 sz = e->pages * PAGE_SIZE;
-        if (sz == 0) buf[pos++] = '0';
-        else { while (sz) { buf[pos++] = '0' + (sz % 10); sz /= 10; } }
-        for (int j = pos-1; j >= 0; j--) vga_putchar(buf[j]);
-        print_str(" tag=");
-        print_str(e->tag);
-        print_str("\r\n");
+        char buf[64];
+        ksnprintf(buf, sizeof(buf), "  VA=%016llx size=%llu tag=%s\r\n",
+                  (unsigned long long)e->virt,
+                  (unsigned long long)e->pages * PAGE_SIZE,
+                  e->tag);
+        print_str(buf);
     }
 }
 

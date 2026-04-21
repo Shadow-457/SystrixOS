@@ -28,20 +28,18 @@
 #include "../include/kernel.h"
 
 /* ================================================================
- *  Utility — decimal printer (used below, no libc available)
+ *  Utility — decimal/hex printers using ksnprintf
  * ================================================================ */
 static void res_print_u64(u64 n) {
-    if (n == 0) { vga_putchar('0'); return; }
-    char buf[21]; int i = 0;
-    while (n) { buf[i++] = (char)('0' + n % 10); n /= 10; }
-    while (i--) vga_putchar((u8)buf[i]);
+    char buf[24];
+    ksnprintf(buf, sizeof(buf), "%llu", (unsigned long long)n);
+    print_str(buf);
 }
 
 static void res_print_hex64(u64 v) {
-    static const char h[] = "0123456789ABCDEF";
-    print_str("0x");
-    for (int i = 60; i >= 0; i -= 4)
-        vga_putchar((u8)h[(v >> i) & 0xF]);
+    char buf[20];
+    ksnprintf(buf, sizeof(buf), "0x%016llx", (unsigned long long)v);
+    print_str(buf);
 }
 
 /* ================================================================

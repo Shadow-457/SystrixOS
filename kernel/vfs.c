@@ -34,64 +34,8 @@ typedef struct {
     u64 atime, atimensec, mtime, mtimensec, ctime, ctimensec;
 } StatBuf;
 
-typedef struct {
-    u32 uid;
-    u32 gid;
-    u16 mode;
-    u16 type;
-    u64 size;
-    u64 ino;
-    u64 nlink;
-    u64 atime;
-    u64 mtime;
-    u64 ctime;
-    u32 dev;
-    u32 rdev;
-    u64 blocks;
-    u64 blksize;
-} inode_attr_t;
-
-typedef struct inode_ops {
-    i64 (*read)(struct vfs_inode *inode, void *buf, usize count, usize offset);
-    i64 (*write)(struct vfs_inode *inode, const void *buf, usize count, usize offset);
-    i64 (*readdir)(struct vfs_inode *inode, void *buf, usize count, usize *offset);
-    i64 (*lookup)(struct vfs_inode *dir, const char *name, struct vfs_inode *out);
-    i64 (*create)(struct vfs_inode *dir, const char *name, u16 mode, struct vfs_inode *out);
-    i64 (*mkdir)(struct vfs_inode *dir, const char *name, u16 mode);
-    i64 (*unlink)(struct vfs_inode *dir, const char *name);
-    i64 (*rmdir)(struct vfs_inode *dir, const char *name);
-    i64 (*setattr)(struct vfs_inode *inode, inode_attr_t *attr);
-    i64 (*getsize)(struct vfs_inode *inode);
-} inode_ops_t;
-
-typedef struct vfs_inode {
-    u8 valid;
-    u64 ino;
-    u32 dev;
-    u32 rdev;
-    u32 refcount;
-    inode_attr_t attr;
-    inode_ops_t *ops;
-    void *fs_data;
-    struct vfs_mount *mount;
-} vfs_inode_t;
-
-typedef struct vfs_mount {
-    u8 valid;
-    char path[MAX_PATH];
-    u32 dev;
-    vfs_inode_t root;
-    const char *fstype;
-} vfs_mount_t;
-
-struct vfs_fd {
-    u8 in_use;
-    vfs_inode_t *inode;
-    usize offset;
-    u32 flags;
-    int type;
-    void *pipe_data;
-};
+/* inode_attr_t, inode_ops_t, vfs_inode_t, vfs_mount_t, vfs_fd_t
+ * are now defined in kernel.h — included via kernel.h above */
 
 typedef struct {
     u8 name[11];

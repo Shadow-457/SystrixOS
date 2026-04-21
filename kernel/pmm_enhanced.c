@@ -174,86 +174,37 @@ void pmm_print_stats(void) {
     PmmStats s;
     pmm_get_stats(&s);
 
-    print_str("\n=== PMM Memory Statistics ===\r\n");
-    print_str("Total allocations: ");
-    /* Simple decimal print for u64 */
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.total_allocations;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nTotal frees: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.total_frees;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nCurrent allocated (pages): ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.current_allocated;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nCurrent free (pages): ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.current_free;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nPeak allocated (pages): ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.peak_allocated;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nFragmentation index (0-1000): ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.fragmentation_index;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nCompaction runs: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.compaction_runs;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\nPages compacted: ");
-    {
-        char buf[32]; int pos = 0;
-        u64 v = s.pages_compacted;
-        if (v == 0) buf[pos++] = '0';
-        else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-        for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-    }
-    print_str("\r\n\r\nPer-order allocations:\r\n");
+    { char buf[256];
+      ksnprintf(buf, sizeof(buf),
+                "\n=== PMM Memory Statistics ===\r\n"
+                "Total allocations:            %llu\r\n"
+                "Total frees:                  %llu\r\n"
+                "Current allocated (pages):    %llu\r\n"
+                "Current free (pages):         %llu\r\n"
+                "Peak allocated (pages):       %llu\r\n"
+                "Fragmentation index (0-1000): %llu\r\n"
+                "Compaction runs:              %llu\r\n"
+                "Pages compacted:              %llu\r\n",
+                (unsigned long long)s.total_allocations,
+                (unsigned long long)s.total_frees,
+                (unsigned long long)s.current_allocated,
+                (unsigned long long)s.current_free,
+                (unsigned long long)s.peak_allocated,
+                (unsigned long long)s.fragmentation_index,
+                (unsigned long long)s.compaction_runs,
+                (unsigned long long)s.pages_compacted);
+      print_str(buf); }
+
+    print_str("\r\nPer-order allocations:\r\n");
     for (u32 o = 0; o <= MAX_ORDER; o++) {
         if (s.alloc_per_order[o] > 0) {
-            vga_putchar('0' + o);
-            print_str(": ");
-            char buf[32]; int pos = 0;
-            u64 v = s.alloc_per_order[o];
-            if (v == 0) buf[pos++] = '0';
-            else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-            for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-            print_str("  ");
+            char buf[32];
+            ksnprintf(buf, sizeof(buf), "  order %u: %llu\r\n",
+                      o, (unsigned long long)s.alloc_per_order[o]);
+            print_str(buf);
         }
     }
-    print_str("\r\n===========================\r\n");
+    print_str("===========================\r\n");
 }
 
 /* ---- Defragmentation: try to coalesce free pages --------------
@@ -465,21 +416,10 @@ void pmm_dump_freelist(void) {
             idx = page_node(idx)->next;
         }
         if (count > 0) {
-            print_str("  Order ");
-            vga_putchar('0' + o);
-            print_str(": ");
-            char buf[32]; int pos = 0;
-            u64 v = count;
-            if (v == 0) buf[pos++] = '0';
-            else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-            for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-            print_str(" blocks (");
-            pos = 0;
-            v = count * (1ULL << o);
-            if (v == 0) buf[pos++] = '0';
-            else { while (v) { buf[pos++] = '0' + (v % 10); v /= 10; } }
-            for (int i = pos-1; i >= 0; i--) vga_putchar(buf[i]);
-            print_str(" pages)\r\n");
+            char buf[48];
+            ksnprintf(buf, sizeof(buf), "  Order %u: %u blocks (%llu pages)\r\n",
+                      o, count, (unsigned long long)count * (1ULL << o));
+            print_str(buf);
         }
     }
 }

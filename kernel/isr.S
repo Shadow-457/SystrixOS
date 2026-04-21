@@ -444,7 +444,7 @@ syscall_table:
     .quad sys_open              # 2
     .quad sys_close             # 3
     .quad sys_exit_handler      # 4
-    .quad sys_fstat             # 5
+    .quad sys_malloc            # 5  malloc (libc calls syscall 5 for heap alloc)
     .quad sys_free              # 6
     .quad sys_poll              # 7  poll
     .quad sys_lseek             # 8

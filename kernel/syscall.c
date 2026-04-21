@@ -123,18 +123,59 @@ i64 sys_exit_handler(i64 code) {
 }
 
 /* ── 5: sys_malloc ───────────────────────────────────────────── */
+/* Allocate n bytes in the calling process's address space by
+ * bumping pcb->brk and backing each new page with a physical
+ * frame mapped PTE_USER_RW | PTE_NX into the process's CR3.
+ * Returns a user virtual address (not a kernel heap pointer). */
 void *sys_malloc(usize n) {
-    return heap_malloc(n);
+    if (!n) return (void*)0;
+
+    /* Align to 16 bytes */
+    n = (n + 15) & ~(usize)15;
+
+    PCB *pcb = process_current_pcb();
+    if (!pcb) return (void*)0;
+
+    /* Initialise brk on first call */
+    if (pcb->brk < BRK_BASE) pcb->brk = BRK_BASE;
+
+    u64 start = pcb->brk;
+    u64 end   = start + n;
+
+    if (end > BRK_MAX) return (void*)0;
+
+    /* Map any new pages needed */
+    u64 page_start = start & ~(u64)(PAGE_SIZE - 1);
+    u64 page_end   = (end + PAGE_SIZE - 1) & ~(u64)(PAGE_SIZE - 1);
+
+    for (u64 va = page_start; va < page_end; va += PAGE_SIZE) {
+        /* Only map pages that aren't already present */
+        if (!vmm_virt_to_phys(pcb->cr3, va)) {
+            u64 phys = pmm_alloc();
+            if (!phys) return (void*)0;
+            memset((void*)phys, 0, PAGE_SIZE);
+            vmm_map(pcb->cr3, va, phys, PTE_USER_RW | PTE_NX);
+        }
+    }
+
+    pcb->brk = end;
+    return (void*)(usize)start;
 }
 
 /* ── 6: sys_free ─────────────────────────────────────────────── */
+/* Bump allocator: free is a no-op (memory reclaimed on exit). */
 i64 sys_free(void *p) {
-    heap_free(p);
+    (void)p;
     return 0;
 }
 
 /* ── 7: sys_yield ────────────────────────────────────────────── */
-i64 sys_yield(void) { return 0; }
+/* Pet the watchdog so that well-behaved event-loop processes that
+ * call sys_yield() every iteration are not killed for "hanging".
+ * Without this, the BROWSER (and any other yield-based userland
+ * program) is terminated after WD_TIMEOUT_MS (5 s) even though it
+ * is actively running its event loop. */
+i64 sys_yield(void) { watchdog_pet(); return 0; }
 
 /* ── 9: sys_mmap ─────────────────────────────────────────────── */
 /* Demand-paging mmap: register a VMA, do NOT allocate physical pages.

@@ -743,27 +743,15 @@ int net_http_get(u32 ip, u16 port, const char *path,
     }
 
     /* build GET request */
-    u8 req[512];
-    u16 rlen = 0;
-    /* GET /path HTTP/1.0\r\nHost: x.x.x.x\r\nConnection: close\r\n\r\n */
-    const char *get = "GET ";
-    for (int i = 0; get[i]; i++) req[rlen++] = (u8)get[i];
-    for (int i = 0; path[i]; i++) req[rlen++] = (u8)path[i];
-    const char *ver = " HTTP/1.0\r\nHost: ";
-    for (int i = 0; ver[i]; i++) req[rlen++] = (u8)ver[i];
-    /* print IP digits */
+    char req[512];
     u32 hip = ntohl(ip);
-    for (int s = 24; s >= 0; s -= 8) {
-        u8 octet = (u8)(hip >> s);
-        if (octet >= 100) req[rlen++] = (u8)('0' + octet/100);
-        if (octet >= 10)  req[rlen++] = (u8)('0' + (octet/10)%10);
-        req[rlen++] = (u8)('0' + octet%10);
-        if (s > 0) req[rlen++] = '.';
-    }
-    const char *tail = "\r\nConnection: close\r\n\r\n";
-    for (int i = 0; tail[i]; i++) req[rlen++] = (u8)tail[i];
+    int rlen = ksnprintf(req, sizeof(req),
+        "GET %s HTTP/1.0\r\nHost: %u.%u.%u.%u\r\nConnection: close\r\n\r\n",
+        path,
+        (hip >> 24) & 0xFF, (hip >> 16) & 0xFF,
+        (hip >>  8) & 0xFF,  hip        & 0xFF);
 
-    tcp_send_data(c, req, rlen);
+    tcp_send_data(c, (u8*)req, (u16)rlen);
 
     /* wait for FIN or buffer full */
     for (int i = 0; i < 2000000; i++) {
@@ -924,13 +912,11 @@ u32 net_make_ip(u8 a, u8 b, u8 c, u8 d) {
 
 void net_print_ip(u32 ip) {
     u32 h = ntohl(ip);
-    for (int s = 24; s >= 0; s -= 8) {
-        u8 oct = (u8)(h >> s);
-        if (oct >= 100) vga_putchar((u8)('0' + oct/100));
-        if (oct >= 10)  vga_putchar((u8)('0' + (oct/10)%10));
-        vga_putchar((u8)('0' + oct%10));
-        if (s > 0) vga_putchar('.');
-    }
+    char buf[20];
+    ksnprintf(buf, sizeof(buf), "%u.%u.%u.%u",
+              (h >> 24) & 0xFF, (h >> 16) & 0xFF,
+              (h >>  8) & 0xFF,  h        & 0xFF);
+    print_str(buf);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1069,23 +1055,11 @@ static volatile int http_server_running = 0;
 
 static void http_send_response(TcpConn *c, int status,
                                const char *body, u16 blen) {
-    /* Build status line + minimal headers */
-    u8 hdr[128];
-    u16 hlen = 0;
     const char *status_str = (status == 200) ? "200 OK" : "404 Not Found";
-    const char *prefix = "HTTP/1.0 ";
-    for (int i = 0; prefix[i]; i++) hdr[hlen++] = (u8)prefix[i];
-    for (int i = 0; status_str[i]; i++) hdr[hlen++] = (u8)status_str[i];
-    const char *crlf = "\r\nContent-Length: ";
-    for (int i = 0; crlf[i]; i++) hdr[hlen++] = (u8)crlf[i];
-    /* Print blen as decimal */
-    char lenbuf[10]; int li = 0;
-    u16 tmp = blen;
-    if (tmp == 0) { lenbuf[li++] = '0'; }
-    else { while (tmp) { lenbuf[li++] = '0' + (tmp % 10); tmp /= 10; } }
-    for (int i = li - 1; i >= 0; i--) hdr[hlen++] = (u8)lenbuf[i];
-    const char *tail = "\r\nConnection: close\r\n\r\n";
-    for (int i = 0; tail[i]; i++) hdr[hlen++] = (u8)tail[i];
+    char hdr[128];
+    int hlen = ksnprintf(hdr, sizeof(hdr),
+        "HTTP/1.0 %s\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
+        status_str, (unsigned)blen);
 
     net_tcp_send(c, hdr, hlen);
     if (blen > 0) net_tcp_send(c, body, blen);
@@ -1185,14 +1159,7 @@ void net_http_serve(u16 port) {
         return;
     }
     http_server_running = 1;
-    print_str("httpd: listening on port ");
-    /* print port number */
-    {
-        char pb[8]; int pi = 0; u16 tmp = port;
-        if (!tmp) { pb[pi++] = '0'; }
-        else { while (tmp) { pb[pi++] = '0' + (tmp%10); tmp /= 10; } }
-        for (int i = pi-1; i >= 0; i--) vga_putchar((u8)pb[i]);
-    }
+    { char pb[16]; ksnprintf(pb, sizeof(pb), "httpd: listening on port %u\r\n", (unsigned)port); print_str(pb); }
     print_str("\r\nPress any key to stop.\r\n");
 
     while (http_server_running) {

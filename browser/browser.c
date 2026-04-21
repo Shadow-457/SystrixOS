@@ -280,7 +280,6 @@ static const char home_html[] =
 /* ── Main ────────────────────────────────────────────────────── */
 int main(void) {
     /* Allocate large buffers from heap (avoids 5MB BSS → Bad ELF) */
-    extern unsigned int **render_fb_ptr;   /* in render.h */
     render_fb   = (unsigned int*)malloc((unsigned long)(FB_W * FB_H * 4));
     layout_pool = (LayoutBox*)   malloc((unsigned long)(LAYOUT_MAX_BOXES * sizeof(LayoutBox)));
     html_buf    = (char*)        malloc((unsigned long)(BUF_SIZE));
