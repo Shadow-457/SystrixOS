@@ -89,7 +89,6 @@ SoftTail OS is a from-scratch, x86-64 microkernel written entirely in C (kernel)
 - Signals (POSIX-compatible), pipes, futex, pthreads
 - KASLR, SMAP, SMEP, stack canaries, red-zone guards
 - Kernel watchdog, OOM killer, basic SMP bringup
-- A self-hosted scripting language compiler (SHC / Shadow)
 
 **What it does NOT have (yet):**
 
