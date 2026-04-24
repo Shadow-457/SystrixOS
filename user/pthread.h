@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — user/pthread.h
+ *  Systrix OS — user/pthread.h
  *  POSIX thread API built on top of sys_clone (#56) + sys_futex (#202)
  *
  *  Implements:

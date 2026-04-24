@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/sound.c
+ *  Systrix OS — kernel/sound.c
  *  Phase 3: Audio
  *
  *  Two independent audio subsystems:

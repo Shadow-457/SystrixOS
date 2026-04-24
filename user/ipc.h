@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — user/ipc.h
+ *  Systrix OS — user/ipc.h
  *  Userland helper for microkernel IPC.
  *
  *  Usage in a server:

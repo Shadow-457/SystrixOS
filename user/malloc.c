@@ -1,8 +1,8 @@
 /* ================================================================
- *  SoftTail OS — user/malloc.c  (Production User-Space Allocator)
+ *  Systrix OS — user/malloc.c  (Production User-Space Allocator)
  *
  *  A dlmalloc-style allocator with segregated free lists (bins).
- *  Designed for user-space programs running on SoftTail OS.
+ *  Designed for user-space programs running on Systrix OS.
  *
  *  Features:
  *    - Segregated free lists (8 bins for different size ranges)

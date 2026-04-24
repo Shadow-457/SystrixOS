@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/pmm_enhanced.c  (Production-Level PMM)
+ *  Systrix OS — kernel/pmm_enhanced.c  (Production-Level PMM)
  *
  *  Enhancements over the original pmm.c:
  *

@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/vmm_enhanced.c  (Production-Level VMM)
+ *  Systrix OS — kernel/vmm_enhanced.c  (Production-Level VMM)
  *
  *  Enhancements over the original vmm.c:
  *

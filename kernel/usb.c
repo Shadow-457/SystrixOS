@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/usb.c
+ *  Systrix OS — kernel/usb.c
  *  USB subsystem: EHCI host controller + XHCI full slot enumeration
  *  + USB Mass Storage (Bulk-Only Transport / SCSI transparent)
  *

@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/vmm.c  (v2: VMA tracking + Demand Paging + CoW)
+ *  Systrix OS — kernel/vmm.c  (v2: VMA tracking + Demand Paging + CoW)
  *
  *  Builds on the page-table walker from v1, adding:
  *

@@ -1,10 +1,10 @@
 /* ================================================================
- *  SoftTail OS — user/echo_server.c
+ *  Systrix OS — user/echo_server.c
  *  Minimal demo server: registers as "echo", receives messages,
  *  sends them straight back.  Proves IPC round-trip works.
  *
  *  Build:  add to Makefile like other user programs
- *  Run:    elf ECHO_SRV   (in SoftTail shell, starts background server)
+ *  Run:    elf ECHO_SRV   (in Systrix shell, starts background server)
  *          elf ECHO_CLI   (sends a test message, prints reply)
  * ================================================================ */
 

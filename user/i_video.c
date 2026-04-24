@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — user/i_video.c
+ *  Systrix OS — user/i_video.c
  *  DOOM platform layer: video
  *
  *  DOOM renders to a 320×200 software buffer (screens[0]).
@@ -8,7 +8,7 @@
  *  palette passed via I_SetPalette().
  *
  *  Build alongside the other DOOM source files and link with
- *  crt0.o libc.o — no other SoftTail-specific objects needed.
+ *  crt0.o libc.o — no other Systrix-specific objects needed.
  * ================================================================ */
 
 #include "libc.h"

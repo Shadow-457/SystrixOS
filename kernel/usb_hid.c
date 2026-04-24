@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/usb_hid.c
+ *  Systrix OS — kernel/usb_hid.c
  *  USB HID keyboard + mouse driver.
  *
  *  Strategy:

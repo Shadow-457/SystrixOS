@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/ahci.c   (enhanced v2)
+ *  Systrix OS — kernel/ahci.c   (enhanced v2)
  *  AHCI SATA driver: HBA init, port start/stop, ATA identify,
  *  48-bit LBA DMA read/write (multi-sector), error recovery,
  *  cache flush.

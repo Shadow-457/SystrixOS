@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/gfx.c
+ *  Systrix OS — kernel/gfx.c
  *  Phase 2: Graphics & Rendering
  *
  *  Three subsystems:

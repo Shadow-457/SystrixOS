@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/vmalloc.c  (Kernel Virtual Memory Allocator)
+ *  Systrix OS — kernel/vmalloc.c  (Kernel Virtual Memory Allocator)
  *
  *  Purpose:
  *    Provides a kernel-space virtual memory allocator for large

@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/ps2.c
+ *  Systrix OS — kernel/ps2.c
  *  Full PS/2 i8042 keyboard + mouse driver.
  *
  *  Keyboard:

@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/tss.c
+ *  Systrix OS — kernel/tss.c
  *
  *  Sets up the x86-64 Task State Segment (TSS) and installs it in
  *  the GDT so the CPU has a valid kernel stack (RSP0) to switch to

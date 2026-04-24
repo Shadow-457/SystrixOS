@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/ipc.c
+ *  Systrix OS — kernel/ipc.c
  *  Inter-Process Communication (IPC) — microkernel message passing
  *
  *  This is the ONLY thing a microkernel really needs beyond memory

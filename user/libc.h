@@ -1,6 +1,6 @@
 /* ================================================================
- *  SoftTail OS — user/libc.h
- *  Basic C library for user programs running on SoftTail OS.
+ *  Systrix OS — user/libc.h
+ *  Basic C library for user programs running on Systrix OS.
  *
  *  Usage:
  *    #include "libc.h"

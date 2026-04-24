@@ -1,9 +1,9 @@
 /*
- * tls.h — Minimal TLS 1.2 client for SoftTail OS
+ * tls.h — Minimal TLS 1.2 client for Systrix OS
  *
  * Cipher suite: TLS_RSA_WITH_AES_128_GCM_SHA256 (0x009C)
  * Self-contained: AES-128, GCM, SHA-256, HMAC-SHA256, PRF, PKCS#1 v1.5 verify stub.
- * Wraps SoftTail sys_connect / sys_send / sys_recv syscalls.
+ * Wraps Systrix sys_connect / sys_send / sys_recv syscalls.
  *
  * Usage:
  *   TlsCtx ctx;
@@ -13,8 +13,8 @@
  *   tls_close(&ctx);
  */
 
-#ifndef SOFTTAIL_TLS_H
-#define SOFTTAIL_TLS_H
+#ifndef SYSTRIX_TLS_H
+#define SYSTRIX_TLS_H
 
 #include "libc.h"
 
@@ -798,7 +798,7 @@ static int tls_connect(TlsCtx *t, const char *ip_str, int port, const char *host
         if(octs<4){if(*pp!='.') return -1; pp++;}
     }
 
-    /* struct sockaddr_in layout assumed by SoftTail kernel */
+    /* struct sockaddr_in layout assumed by Systrix kernel */
     struct { u16 family; u16 port; u32 addr; u8 pad[8]; } sa;
     sa.family = 2; /* AF_INET */
     sa.port   = (u16)(((port>>8)&0xff)|((port&0xff)<<8)); /* htons */
@@ -862,8 +862,8 @@ static int tls_read(TlsCtx *t, u8 *out, u32 maxlen) {
 static void tls_close(TlsCtx *t) {
     u8 alert[2] = {1, 0}; /* warning, close_notify */
     tls_send_record(t, TLS_ALERT, alert, 2);
-    /* No close syscall in SoftTail yet — socket will timeout */
+    /* No close syscall in Systrix yet — socket will timeout */
     t->encrypted = 0;
 }
 
-#endif /* SOFTTAIL_TLS_H */
+#endif /* SYSTRIX_TLS_H */

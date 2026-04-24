@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/resilience.c
+ *  Systrix OS — kernel/resilience.c
  *
  *  Four subsystems added together:
  *

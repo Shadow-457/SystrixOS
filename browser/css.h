@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS Browser — browser/css.h
+ *  Systrix OS Browser — browser/css.h
  *  CSS tokeniser + style resolver (Phase 3)
  *
  *  Parses inline <style> blocks and inline style="" attrs.

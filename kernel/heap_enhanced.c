@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/heap_enhanced.c  (Production-Level Heap)
+ *  Systrix OS — kernel/heap_enhanced.c  (Production-Level Heap)
  *
  *  Enhancements over the original heap.c:
  *

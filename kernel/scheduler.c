@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS — kernel/scheduler.c
+ *  Systrix OS — kernel/scheduler.c
  *  Preemptive round-robin scheduler.
  *
  *  Sets up IDT, remaps PIC, programs PIT to 100 Hz.

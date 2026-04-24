@@ -1,5 +1,5 @@
 /* ================================================================
- *  SoftTail OS Browser — browser/html.h
+ *  Systrix OS Browser — browser/html.h
  *  HTML5 tokeniser + DOM tree (Phase 2)
  *
  *  Produces a tree of DomNode structs from raw HTML bytes.

@@ -1,5 +1,5 @@
 # ================================================================
-#  SoftTail OS — kernel/entry.S
+#  Systrix OS — kernel/entry.S
 #  Kernel entry: real mode → protected mode → long mode → kernel_main()
 # ================================================================
 

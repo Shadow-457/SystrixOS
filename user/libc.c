@@ -1,8 +1,8 @@
 /* ================================================================
- *  SoftTail OS — user/libc.c
+ *  Systrix OS — user/libc.c
  *  Basic C library implementation for user programs.
  *
- *  All syscalls go through the SoftTail OS syscall interface
+ *  All syscalls go through the Systrix OS syscall interface
  *  (SYSCALL instruction, Linux x86-64 ABI register convention).
  * ================================================================ */
 #include "libc.h"
@@ -12,7 +12,7 @@ int errno = 0;
 
 /* ================================================================
  *  Syscall primitives
- *  SoftTail OS uses the Linux x86-64 SYSCALL convention:
+ *  Systrix OS uses the Linux x86-64 SYSCALL convention:
  *    rax = syscall number
  *    args: rdi, rsi, rdx, r10, r8, r9
  *    return in rax (negative = error code)
