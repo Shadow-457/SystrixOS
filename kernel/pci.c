@@ -132,7 +132,7 @@ static void scan_bus(u8 bus){
 /* ── Public API ──────────────────────────────────────────────── */
 void pci_scan_all(void){
     g_pcnt=0; scan_bus(0);
-    print_str("[PCI] "); print_hex_byte((u8)g_pcnt); print_str(" devices\r\n");
+    kprintf("[PCI] "); print_hex_byte((u8)g_pcnt); kprintf(" devices\r\n");
 }
 void *pci_find_device(u16 v,u16 d){for(int i=0;i<g_pcnt;i++)if(g_pdev[i].vendor==v&&g_pdev[i].device==d)return&g_pdev[i];return 0;}
 void *pci_find_class(u8 c,u8 s){for(int i=0;i<g_pcnt;i++)if(g_pdev[i].class_code==c&&g_pdev[i].subclass==s)return&g_pdev[i];return 0;}
@@ -149,13 +149,13 @@ void pci_power_on(void *dp){
     if((pmcs&3)==3){pci_write16(d->bus,d->slot,d->fn,(u16)(d->cap_pm+4),(u16)(pmcs&~3u));for(volatile int i=0;i<500000;i++);}
 }
 void pci_list_devices(void){
-    print_str("BUS SL FN VEN:DEV  CL:SB PI IRQ\r\n");
+    kprintf("BUS SL FN VEN:DEV  CL:SB PI IRQ\r\n");
     for(int i=0;i<g_pcnt;i++){PciDev*d=&g_pdev[i];
-        print_hex_byte(d->bus);print_str(" ");print_hex_byte(d->slot);print_str(" ");
-        print_hex_byte(d->fn);print_str(" ");
-        print_hex_byte((u8)(d->vendor>>8));print_hex_byte((u8)d->vendor);print_str(":");
-        print_hex_byte((u8)(d->device>>8));print_hex_byte((u8)d->device);print_str("  ");
-        print_hex_byte(d->class_code);print_str(":");print_hex_byte(d->subclass);print_str(" ");
-        print_hex_byte(d->prog_if);print_str(" ");print_hex_byte(d->irq_line);print_str("\r\n");
+        print_hex_byte(d->bus);kprintf(" ");print_hex_byte(d->slot);kprintf(" ");
+        print_hex_byte(d->fn);kprintf(" ");
+        print_hex_byte((u8)(d->vendor>>8));print_hex_byte((u8)d->vendor);kprintf(":");
+        print_hex_byte((u8)(d->device>>8));print_hex_byte((u8)d->device);kprintf("  ");
+        print_hex_byte(d->class_code);kprintf(":");print_hex_byte(d->subclass);kprintf(" ");
+        print_hex_byte(d->prog_if);kprintf(" ");print_hex_byte(d->irq_line);kprintf("\r\n");
     }
 }

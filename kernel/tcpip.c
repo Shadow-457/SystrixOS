@@ -100,6 +100,39 @@ typedef struct {
     int nonblock;
 } socket_t;
 
+
+/* Forward declarations for net.c functions used here */
+extern void net_ip_send(u32 dst_ip, u8 proto, const void *payload, u16 plen);
+extern void net_send_frame(const u8 *data, usize len);
+extern u32  net_ip;
+
+/* TCP checksum — RFC 793 pseudo-header + segment */
+static u16 tcp_checksum(u32 src_ip, u32 dst_ip,
+                         const void *seg, u16 seg_len,
+                         const void *data, u16 data_len) {
+    u32 sum = 0;
+    /* pseudo-header: src, dst, zero, proto=6, tcp length */
+    u16 tcp_len = (u16)(seg_len + data_len);
+    sum += (src_ip >> 16) & 0xFFFF;
+    sum += (src_ip)       & 0xFFFF;
+    sum += (dst_ip >> 16) & 0xFFFF;
+    sum += (dst_ip)       & 0xFFFF;
+    sum += 0x0006;              /* protocol TCP */
+    sum += tcp_len;
+    /* segment bytes */
+    const u16 *p = (const u16*)seg;
+    u16 n = seg_len;
+    while (n > 1) { sum += *p++; n -= 2; }
+    if (n) sum += *(const u8*)p;
+    /* data bytes */
+    p = (const u16*)data;
+    n = data_len;
+    while (n > 1) { sum += *p++; n -= 2; }
+    if (n) sum += *(const u8*)p;
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return (u16)(~sum);
+}
+
 static socket_t socket_table[SOCKET_MAX];
 static u16 next_port = 49152;
 
@@ -156,8 +189,8 @@ static void arp_send(u32 target_ip, u8 *target_mac) {
     u8 pkt[42];
     memset(pkt, 0, 42);
     eth_hdr_t *eth = (eth_hdr_t*)pkt;
-    for (int i = 0; i < 6; i++) eth->dst[i] = 0xFF;
-    for (int i = 0; i < 6; i++) eth->src[i] = net_mac[i];
+    memset(eth->dst, 0xFF, 6);
+    memcpy(eth->src, net_mac, 6);
     eth->type = 0x0806;
     arp_pkt_t *arp = (arp_pkt_t*)(pkt + ETH_HDR_LEN);
     arp->hw_type = 1;
@@ -165,10 +198,9 @@ static void arp_send(u32 target_ip, u8 *target_mac) {
     arp->hw_len = 6;
     arp->proto_len = 4;
     arp->op = 1;
-    for (int i = 0; i < 6; i++) arp->sender_mac[i] = net_mac[i];
+    memcpy(arp->sender_mac, net_mac, 6);
     arp->sender_ip = net_ip;
     arp->target_ip = target_ip;
-    extern void net_send_frame(const u8 *data, usize len);
     net_send_frame(pkt, 42);
     (void)target_mac;
 }
@@ -182,8 +214,8 @@ static void arp_handle(u8 *data, usize len) {
         u8 reply[42];
         memset(reply, 0, 42);
         eth_hdr_t *eth = (eth_hdr_t*)reply;
-        for (int i = 0; i < 6; i++) eth->dst[i] = arp->sender_mac[i];
-        for (int i = 0; i < 6; i++) eth->src[i] = net_mac[i];
+        memcpy(eth->dst, arp->sender_mac, 6);
+        memcpy(eth->src, net_mac, 6);
         eth->type = 0x0806;
         arp_pkt_t *arp_r = (arp_pkt_t*)(reply + ETH_HDR_LEN);
         arp_r->hw_type = 1;
@@ -191,9 +223,9 @@ static void arp_handle(u8 *data, usize len) {
         arp_r->hw_len = 6;
         arp_r->proto_len = 4;
         arp_r->op = 2;
-        for (int i = 0; i < 6; i++) arp_r->sender_mac[i] = net_mac[i];
+        memcpy(arp_r->sender_mac, net_mac, 6);
         arp_r->sender_ip = net_ip;
-        for (int i = 0; i < 6; i++) arp_r->target_mac[i] = arp->sender_mac[i];
+        memcpy(arp_r->target_mac, arp->sender_mac, 6);
         arp_r->target_ip = arp->sender_ip;
         extern void net_send_frame(const u8 *data, usize len);
         net_send_frame(reply, 42);
@@ -201,74 +233,35 @@ static void arp_handle(u8 *data, usize len) {
 }
 
 static void icmp_send(u32 dst_ip, u8 type, u8 code, u16 id, u16 seq, const void *data, usize len) {
-    extern u8 net_mac[6];
-    extern u32 net_ip;
-    u8 pkt[ETH_HDR_LEN + IP_HDR_LEN + ICMP_HDR_LEN + 64];
-    usize pkt_len = ETH_HDR_LEN + IP_HDR_LEN + ICMP_HDR_LEN + len;
-    eth_hdr_t *eth = (eth_hdr_t*)pkt;
-    memset(eth->dst, 0xFF, 6);
-    for (int i = 0; i < 6; i++) eth->src[i] = net_mac[i];
-    eth->type = 0x0800;
-    ip_hdr_t *ip = (ip_hdr_t*)(pkt + ETH_HDR_LEN);
-    ip->ver_ihl = 0x45;
-    ip->tos = 0;
-    ip->total_len = IP_HDR_LEN + ICMP_HDR_LEN + len;
-    ip->id = 0;
-    ip->frag_off = 0;
-    ip->ttl = 64;
-    ip->protocol = IP_PROTO_ICMP;
-    ip->checksum = 0;
-    ip->saddr = net_ip;
-    ip->daddr = dst_ip;
-    ip->checksum = ip_checksum(ip, IP_HDR_LEN);
-    icmp_hdr_t *icmp = (icmp_hdr_t*)(pkt + ETH_HDR_LEN + IP_HDR_LEN);
-    icmp->type = type;
-    icmp->code = code;
-    icmp->checksum = 0;
-    icmp->id = id;
-    icmp->seq = seq;
-    if (data && len > 0) memcpy(icmp + 1, data, len);
-    icmp->checksum = ip_checksum(icmp, ICMP_HDR_LEN + len);
-    extern void net_send_frame(const u8 *data, usize len);
-    net_send_frame(pkt, pkt_len);
+    u8 seg[ICMP_HDR_LEN + 64];
+    icmp_hdr_t *icmp = (icmp_hdr_t*)seg;
+    icmp->type = type; icmp->code = code;
+    icmp->checksum = 0; icmp->id = id; icmp->seq = seq;
+    if (data && len > 0 && len <= 64) memcpy(seg + ICMP_HDR_LEN, data, len);
+    icmp->checksum = ip_checksum(seg, ICMP_HDR_LEN + len);
+    net_ip_send(dst_ip, IP_PROTO_ICMP, seg, (u16)(ICMP_HDR_LEN + len));
 }
 
 static void tcp_send(int sock_idx, u8 flags) {
     socket_t *s = &socket_table[sock_idx];
-    extern u8 net_mac[6];
     extern u32 net_ip;
-    u8 pkt[ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 1500];
-    eth_hdr_t *eth = (eth_hdr_t*)pkt;
-    memset(eth->dst, 0xFF, 6);
-    for (int i = 0; i < 6; i++) eth->src[i] = net_mac[i];
-    eth->type = 0x0800;
-    ip_hdr_t *ip = (ip_hdr_t*)(pkt + ETH_HDR_LEN);
-    ip->ver_ihl = 0x45;
-    ip->tos = 0;
-    ip->total_len = IP_HDR_LEN + TCP_HDR_LEN;
-    ip->id = 0;
-    ip->frag_off = 0;
-    ip->ttl = 64;
-    ip->protocol = IP_PROTO_TCP;
-    ip->checksum = 0;
-    ip->saddr = net_ip;
-    ip->daddr = s->remote_ip;
-    ip->checksum = ip_checksum(ip, IP_HDR_LEN);
-    tcp_hdr_t *tcp = (tcp_hdr_t*)(pkt + ETH_HDR_LEN + IP_HDR_LEN);
-    tcp->sport = s->local_port;
-    tcp->dport = s->remote_port;
-    tcp->seq = s->seq;
-    tcp->ack_seq = s->ack_seq;
+    /* Build only the TCP segment — net_ip_send handles Ethernet + ARP */
+    u8 seg[TCP_HDR_LEN];
+    tcp_hdr_t *tcp = (tcp_hdr_t*)seg;
+    tcp->sport    = s->local_port;
+    tcp->dport    = s->remote_port;
+    tcp->seq      = s->seq;
+    tcp->ack_seq  = (flags & TCP_ACK) ? s->ack_seq : 0;
     tcp->data_off = (TCP_HDR_LEN / 4) << 4;
-    tcp->flags = flags;
-    tcp->window = s->window;
-    tcp->check = 0;
-    tcp->urg_ptr = 0;
-    usize total_len = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN;
-    extern void net_send_frame(const u8 *data, usize len);
-    net_send_frame(pkt, total_len);
+    tcp->flags    = flags;
+    tcp->window   = s->window;
+    tcp->check    = 0;
+    tcp->urg_ptr  = 0;
+    /* TCP checksum over pseudo-header + segment */
+    tcp->check = tcp_checksum(net_ip, s->remote_ip, seg, TCP_HDR_LEN, 0, 0);
+    net_ip_send(s->remote_ip, IP_PROTO_TCP, seg, TCP_HDR_LEN);
     if (flags & TCP_SYN) s->seq++;
-    if (flags & TCP_ACK) s->seq++;
+    if ((flags & TCP_FIN)) s->seq++;
 }
 
 i64 sys_socket(int domain, int type, int protocol) {
@@ -324,6 +317,7 @@ i64 sys_connect(int sockfd, const void *addr, usize addrlen) {
         if (s->state == TCP_ESTABLISHED) return 0;
         if (s->state == TCP_CLOSED)      return (i64)ECONNREFUSED;
         __asm__ volatile("pause");
+        if ((i & 127) == 0) watchdog_pet();
     }
     return (i64)ETIMEDOUT;
 }
@@ -347,6 +341,7 @@ i64 sys_accept(int sockfd, void *addr, usize *addrlen) {
                 return i;
         }
         __asm__ volatile("pause");
+        if ((spin & 127) == 0) watchdog_pet();
     }
     return (i64)EAGAIN;
 }
@@ -357,39 +352,22 @@ i64 sys_send(int sockfd, const void *buf, usize len, int flags) {
     if (!s) return (i64)EBADF;
     if (s->state != TCP_ESTABLISHED) return (i64)ENOTCONN;
     if (len > 1500) len = 1500;
-    extern u8 net_mac[6];
     extern u32 net_ip;
-    u8 pkt[ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + 1500];
-    eth_hdr_t *eth = (eth_hdr_t*)pkt;
-    memset(eth->dst, 0xFF, 6);
-    for (int i = 0; i < 6; i++) eth->src[i] = net_mac[i];
-    eth->type = 0x0800;
-    ip_hdr_t *ip = (ip_hdr_t*)(pkt + ETH_HDR_LEN);
-    ip->ver_ihl = 0x45;
-    ip->tos = 0;
-    ip->total_len = IP_HDR_LEN + TCP_HDR_LEN + len;
-    ip->id = 0;
-    ip->frag_off = 0;
-    ip->ttl = 64;
-    ip->protocol = IP_PROTO_TCP;
-    ip->checksum = 0;
-    ip->saddr = net_ip;
-    ip->daddr = s->remote_ip;
-    ip->checksum = ip_checksum(ip, IP_HDR_LEN);
-    tcp_hdr_t *tcp = (tcp_hdr_t*)(pkt + ETH_HDR_LEN + IP_HDR_LEN);
-    tcp->sport = s->local_port;
-    tcp->dport = s->remote_port;
-    tcp->seq = s->seq;
-    tcp->ack_seq = s->ack_seq;
+    /* Build TCP segment with data — net_ip_send handles Ethernet + ARP */
+    u8 seg[TCP_HDR_LEN + 1500];
+    tcp_hdr_t *tcp = (tcp_hdr_t*)seg;
+    tcp->sport    = s->local_port;
+    tcp->dport    = s->remote_port;
+    tcp->seq      = s->seq;
+    tcp->ack_seq  = s->ack_seq;
     tcp->data_off = (TCP_HDR_LEN / 4) << 4;
-    tcp->flags = TCP_PSH | TCP_ACK;
-    tcp->window = s->window;
-    tcp->check = 0;
-    tcp->urg_ptr = 0;
-    if (buf && len > 0) memcpy(tcp + 1, buf, len);
-    usize total_len = ETH_HDR_LEN + IP_HDR_LEN + TCP_HDR_LEN + len;
-    extern void net_send_frame(const u8 *data, usize len);
-    net_send_frame(pkt, total_len);
+    tcp->flags    = TCP_PSH | TCP_ACK;
+    tcp->window   = s->window;
+    tcp->check    = 0;
+    tcp->urg_ptr  = 0;
+    if (buf && len > 0) memcpy(seg + TCP_HDR_LEN, buf, len);
+    tcp->check = tcp_checksum(net_ip, s->remote_ip, seg, TCP_HDR_LEN, buf, (u16)len);
+    net_ip_send(s->remote_ip, IP_PROTO_TCP, seg, (u16)(TCP_HDR_LEN + len));
     s->seq += len;
     return (i64)len;
 }
@@ -407,6 +385,7 @@ i64 sys_recv(int sockfd, void *buf, usize len, int flags) {
             if (s->recv_len > 0) break;
             if (s->state != TCP_ESTABLISHED) return (i64)ENOTCONN;
             __asm__ volatile("pause");
+            if ((i & 127) == 0) watchdog_pet();
         }
         if (s->recv_len == 0) return (i64)EAGAIN;
     }
@@ -637,6 +616,7 @@ i64 sys_epoll_wait(int epfd, epoll_event_t *evs, int maxevents, int timeout_ms) 
         if (n > 0) return n;
         if (timeout_ms == 0) return 0;
         __asm__ volatile("pause");
+        if ((iter & 1023) == 0) watchdog_pet();
     }
     return 0; /* timeout */
 }
@@ -664,6 +644,7 @@ i64 sys_poll(pollfd_t *fds, u64 nfds, int timeout_ms) {
         if (n > 0) return n;
         if (timeout_ms == 0) return 0;
         __asm__ volatile("pause");
+        if ((iter & 1023) == 0) watchdog_pet();
     }
     return 0;
 }
@@ -724,8 +705,9 @@ i64 sys_select(int nfds, void *rfds_v, void *wfds_v, void *efds_v, void *tv_v) {
             if (tv[0] == 0 && tv[1] == 0) return 0; /* nonblock */
         }
         __asm__ volatile("pause");
+        if ((iter & 1023) == 0) watchdog_pet();
     }
-    if (rfds) for (int i=0;i<16;i++) rfds->bits[i]=0;
-    if (wfds) for (int i=0;i<16;i++) wfds->bits[i]=0;
+    if (rfds) memset(rfds->bits, 0, sizeof(rfds->bits));
+    if (wfds) memset(wfds->bits, 0, sizeof(wfds->bits));
     return 0;
 }

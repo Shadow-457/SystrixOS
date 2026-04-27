@@ -90,16 +90,16 @@ extern void scheduler_exit(void);
 i64 sys_exit_handler(i64 code) {
     (void)code;
     /* Print "Process <name> exited." using the running PCB's name */
-    print_str("\r\nProcess ");
+    kprintf("\r\nProcess ");
     u8 *p = (u8*)PROC_TABLE;
     for (int i = 0; i < PROC_MAX; i++, p += PROC_PCB_SIZE) {
         PCB *t = (PCB*)p;
         if (t->state == PSTATE_RUNNING) {
-            print_str(t->name[0] ? t->name : "(unknown)");
+            kprintf("%s", t->name[0] ? t->name : "(unknown)");
             break;
         }
     }
-    print_str(" exited.\r\n");
+    kprintf(" exited.\r\n");
 
     /* FIX (Bug 6): disable interrupts for the entire exit sequence.
      * scheduler_exit() marks the process DEAD and frees its kstack.
@@ -356,8 +356,7 @@ i64 sys_uname(void *buf) {
     const char *fields[] = {"Systrix","systrix","0.1.0","#1 SMP","x86_64",""};
     for (int i = 0; i < 6; i++) {
         memset(u[i].f, 0, 65);
-        const char *s = fields[i];
-        for (int j = 0; j < 64 && s[j]; j++) u[i].f[j] = s[j];
+        strlcpy(u[i].f, fields[i], 65);
     }
     return 0;
 }
@@ -512,7 +511,7 @@ i64 sys_fstatat(u64 dirfd, const char *path, void *statbuf, u64 flags) {
  *  POSIX file API extensions + Timer + Mouse-grab
  * ================================================================ */
 
-/* ── 5: sys_fstat ─────────────────────────────────────────────── */
+/* ── sys_fstat ──────────────────────────────────────────────── */
 i64 sys_fstat(u64 fd, void *statbuf) {
     if (fd < 3) {                  /* stdin/stdout/stderr */
         StatBuf *sb = (StatBuf*)statbuf;
@@ -643,3 +642,221 @@ i64 sys_net_dns(const char *hostname) {
     if (!hostname) return 0;
     return (i64)(u64)net_dns_resolve(hostname);
 }
+
+i64 sys_watchdog_pet(void) {
+    watchdog_pet();
+    return 0;
+}
+
+/* ================================================================
+ *  POSIX syscalls needed for Lynx / browser support
+ * ================================================================ */
+
+/* ── 6: sys_lstat ─────────────────────────────────────────────── */
+/* lstat = stat for us — no symlinks on FAT32                     */
+i64 sys_lstat(const char *path, void *statbuf) {
+    if (!path || !statbuf) return (i64)EINVAL;
+    return vfs_stat(path, statbuf);
+}
+
+/* ── 16: sys_ioctl ────────────────────────────────────────────── */
+/* Handle the terminal ioctls that Lynx and libc probe at startup */
+#define TCGETS      0x5401
+#define TCSETS      0x5402
+#define TCSETSW     0x5403
+#define TCSETSF     0x5404
+#define TIOCGWINSZ  0x5413
+#define TIOCSWINSZ  0x5414
+#define TIOCGPGRP   0x540F
+#define TIOCSPGRP   0x5410
+#define FIONREAD    0x541B
+#define FIONBIO     0x5421
+
+typedef struct { u32 c_iflag, c_oflag, c_cflag, c_lflag;
+                 u8  c_cc[19]; u8 _pad; u32 c_ispeed, c_ospeed; } Termios;
+typedef struct { u16 ws_row, ws_col, ws_xpixel, ws_ypixel; } Winsize;
+
+i64 sys_ioctl(u64 fd, u64 req, void *arg) {
+    (void)fd;
+    switch (req) {
+    case TCGETS:
+        if (arg) {
+            Termios *t = (Termios*)arg;
+            memset(t, 0, sizeof(*t));
+            t->c_iflag = 0x500;   /* ICRNL | IXON */
+            t->c_oflag = 0x5;     /* OPOST | ONLCR */
+            t->c_cflag = 0xBF;    /* CS8 | CREAD | HUPCL */
+            t->c_lflag = 0x8A3B;  /* ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE */
+            t->c_ispeed = 38400;
+            t->c_ospeed = 38400;
+        }
+        return 0;
+    case TCSETS: case TCSETSW: case TCSETSF:
+        return 0;   /* accept any terminal mode set */
+    case TIOCGWINSZ:
+        if (arg) {
+            Winsize *w = (Winsize*)arg;
+            w->ws_row    = 25;
+            w->ws_col    = 80;
+            w->ws_xpixel = 640;
+            w->ws_ypixel = 400;
+        }
+        return 0;
+    case TIOCSWINSZ:
+        return 0;
+    case TIOCGPGRP:
+        if (arg) *(int*)arg = 1;
+        return 0;
+    case TIOCSPGRP:
+        return 0;
+    case FIONREAD:
+        if (arg) *(int*)arg = 0;
+        return 0;
+    case FIONBIO:
+        /* set non-blocking on socket fd if arg != 0 */
+        if (fd < 64) {
+            extern i64 sys_fcntl(u64, u64, u64);
+            sys_fcntl(fd, 4, arg ? (*(int*)arg ? 0x800 : 0) : 0);
+        }
+        return 0;
+    default:
+        return (i64)EINVAL;
+    }
+}
+
+/* ── 21: sys_access ───────────────────────────────────────────── */
+i64 sys_access(const char *path, int mode) {
+    (void)mode;  /* FAT32 has no permission bits — if file exists, allow */
+    if (!path) return (i64)EINVAL;
+    /* Special always-present paths */
+    if (strcmp(path, "/dev/tty") == 0) return 0;
+    if (strcmp(path, "/dev/null") == 0) return 0;
+    if (strcmp(path, "/dev/zero") == 0) return 0;
+    if (strcmp(path, "/proc/self/exe") == 0) return 0;
+    StatBuf sb;
+    return vfs_stat(path, &sb);   /* 0 = exists, negative = not found */
+}
+
+/* ── 35: sys_nanosleep ────────────────────────────────────────── */
+i64 sys_nanosleep(const void *req_ptr, void *rem_ptr) {
+    if (!req_ptr) return (i64)EINVAL;
+    const TimeSpec *req = (const TimeSpec*)req_ptr;
+    TimeSpec       *rem = (TimeSpec*)rem_ptr;
+    /* Convert to milliseconds — PIT runs at 1000 Hz */
+    u64 ms = (u64)(req->tv_sec) * 1000 + (u64)(req->tv_nsec) / 1000000;
+    if (ms == 0) ms = 1;   /* always yield at least once */
+    u64 deadline = pit_ticks + ms;
+    while (pit_ticks < deadline) {
+        extern void watchdog_pet(void);
+        watchdog_pet();
+        __asm__ volatile("pause");
+    }
+    if (rem) { rem->tv_sec = 0; rem->tv_nsec = 0; }
+    return 0;
+}
+
+/* ── 80: sys_chdir ────────────────────────────────────────────── */
+/* kernel.c owns cwd_path / cwd_clus — expose them via externs    */
+extern char cwd_path[128];
+extern u32  cwd_clus;
+extern u32  fat32_root_clus;
+
+i64 sys_chdir(const char *path) {
+    if (!path) return (i64)EINVAL;
+    /* Root shortcut */
+    if (path[0] == '/' && path[1] == '\0') {
+        cwd_clus = 0;
+        cwd_path[0] = '/'; cwd_path[1] = '\0';
+        return 0;
+    }
+    /* Check the directory actually exists */
+    StatBuf sb;
+    i64 r = vfs_stat(path, &sb);
+    if (r < 0) return r;
+    /* Update cwd_path */
+    char new_path[128];
+    if (slibc_path_join(new_path, sizeof(new_path), cwd_path, path) < 0)
+        return (i64)ENAMETOOLONG;
+    slibc_path_normalize(new_path);
+    strlcpy(cwd_path, new_path, sizeof(cwd_path));
+    /* cwd_clus: let vfs resolve — set to 0 (root) and let fat layer walk */
+    if (strcmp(cwd_path, "/") == 0) cwd_clus = 0;
+    return 0;
+}
+
+/* ── 89: sys_readlink ─────────────────────────────────────────── */
+/* FAT32 has no symlinks — return EINVAL except for known virtual ones */
+i64 sys_readlink(const char *path, char *buf, usize bufsz) {
+    if (!path || !buf || bufsz == 0) return (i64)EINVAL;
+    /* /proc/self/exe — return a plausible path */
+    if (strcmp(path, "/proc/self/exe") == 0) {
+        usize n = strlcpy(buf, "/bin/lynx", bufsz);
+        return (i64)(n < bufsz ? n : bufsz - 1);
+    }
+    return (i64)EINVAL;   /* no symlinks */
+}
+
+/* ── 99: sys_sysinfo ──────────────────────────────────────────── */
+typedef struct {
+    i64  uptime;
+    u64  loads[3];
+    u64  totalram, freeram, sharedram, bufferram;
+    u64  totalswap, freeswap;
+    u16  procs;
+    u64  totalhigh, freehigh;
+    u32  mem_unit;
+    u8   _pad[20];
+} SysInfo;
+
+i64 sys_sysinfo(void *info_ptr) {
+    if (!info_ptr) return (i64)EINVAL;
+    SysInfo *info = (SysInfo*)info_ptr;
+    memset(info, 0, sizeof(*info));
+    info->uptime    = (i64)(pit_ticks / 1000);
+    info->totalram  = 64 * 1024 * 1024;   /* report 64 MB */
+    info->freeram   = 32 * 1024 * 1024;   /* conservative estimate */
+    info->procs     = 1;
+    info->mem_unit  = 1;
+    return 0;
+}
+
+/* ── 110: sys_getppid ─────────────────────────────────────────── */
+i64 sys_getppid(void) { return 1; }   /* init is always parent */
+
+/* ── 4: sys_stat (Linux compat — same as fstatat with AT_FDCWD) ─ */
+i64 sys_stat(const char *path, void *statbuf) {
+    if (!path || !statbuf) return (i64)EINVAL;
+    /* Handle virtual /proc and /dev paths */
+    if (strcmp(path, "/dev/tty")  == 0 ||
+        strcmp(path, "/dev/null") == 0 ||
+        strcmp(path, "/dev/zero") == 0) {
+        StatBuf *sb = (StatBuf*)statbuf;
+        memset(sb, 0, sizeof(*sb));
+        sb->mode = 0020666;   /* S_IFCHR | rw-rw-rw- */
+        sb->rdev = 5;
+        return 0;
+    }
+    if (slibc_str_starts_with(path, "/proc/")) {
+        StatBuf *sb = (StatBuf*)statbuf;
+        memset(sb, 0, sizeof(*sb));
+        sb->mode = 0040555;   /* S_IFDIR | r-xr-xr-x */
+        return 0;
+    }
+    return vfs_stat(path, statbuf);
+}
+
+/* ── Updated sys_getcwd — return real cwd_path ────────────────── */
+/* Replaces the stub that always returned "/" */
+i64 sys_getcwd_real(char *buf, usize sz) {
+    if (!buf || sz < 2) return (i64)EINVAL;
+    usize len = strlen(cwd_path);
+    if (len + 1 > sz) return (i64)ERANGE;
+    strlcpy(buf, cwd_path, sz);
+    return (i64)(len + 1);
+}
+
+/* ── 334: sys_vga_clear — clear screen and reset kernel cursor ── */
+/* Calls the existing vga_clear() which writes blanks to 0xB8000  */
+/* and resets cur_row/cur_col to 0, so vga_putchar starts fresh.  */
+void vga_clear(void);   /* defined in kernel.c */
+i64  sys_vga_clear(void) { vga_clear(); return 0; }

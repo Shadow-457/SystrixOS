@@ -8,11 +8,6 @@
 #define SHELL_VAR_VAL_MAX 256
 #define MAX_PATH 256
 
-static char *shell_strchr(const char *s, int c) {
-    while (*s) { if (*s == c) return (char*)s; s++; }
-    return NULL;
-}
-
 typedef struct {
     char name[SHELL_VAR_NAME_MAX];
     char value[SHELL_VAR_VAL_MAX];
@@ -37,7 +32,6 @@ static shell_var_t shell_vars[SHELL_VAR_MAX];
 static int shell_var_count = 0;
 static char shell_cwd[MAX_PATH] = "/";
 static char shell_line[SHELL_MAX_LINE];
-static char shell_args_buf[SHELL_MAX_LINE];
 
 static const char *shell_prompt = "systrix$ ";
 
@@ -60,22 +54,14 @@ static const char *shell_get_var(const char *name) {
 static void shell_set_var(const char *name, const char *value) {
     for (int i = 0; i < shell_var_count; i++) {
         if (strcmp(shell_vars[i].name, name) == 0) {
-            memset(shell_vars[i].value, 0, SHELL_VAR_VAL_MAX);
-            usize len = strlen(value);
-            if (len >= SHELL_VAR_VAL_MAX) len = SHELL_VAR_VAL_MAX - 1;
-            memcpy(shell_vars[i].value, value, len);
+            /* strlcpy always NUL-terminates and won't overflow the slot */
+            strlcpy(shell_vars[i].value, value, SHELL_VAR_VAL_MAX);
             return;
         }
     }
     if (shell_var_count < SHELL_VAR_MAX) {
-        memset(shell_vars[shell_var_count].name, 0, SHELL_VAR_NAME_MAX);
-        memset(shell_vars[shell_var_count].value, 0, SHELL_VAR_VAL_MAX);
-        usize nlen = strlen(name);
-        if (nlen >= SHELL_VAR_NAME_MAX) nlen = SHELL_VAR_NAME_MAX - 1;
-        memcpy(shell_vars[shell_var_count].name, name, nlen);
-        usize vlen = strlen(value);
-        if (vlen >= SHELL_VAR_VAL_MAX) vlen = SHELL_VAR_VAL_MAX - 1;
-        memcpy(shell_vars[shell_var_count].value, value, vlen);
+        strlcpy(shell_vars[shell_var_count].name,  name,  SHELL_VAR_NAME_MAX);
+        strlcpy(shell_vars[shell_var_count].value, value, SHELL_VAR_VAL_MAX);
         shell_var_count++;
     }
 }
@@ -87,24 +73,23 @@ static void shell_expand_vars(char *line, char *out, usize max_len) {
             i += 2;
             char varname[SHELL_VAR_NAME_MAX];
             int k = 0;
-            while (line[i] && line[i] != '}' && k < SHELL_VAR_NAME_MAX - 1) {
+            while (line[i] && line[i] != '}' && k < SHELL_VAR_NAME_MAX - 1)
                 varname[k++] = line[i++];
-            }
-            varname[k] = 0;
+            varname[k] = '\0';
             if (line[i] == '}') i++;
             const char *val = shell_get_var(varname);
             if (val) {
-                usize vlen = strlen(val);
-                if (j + vlen < max_len - 1) {
-                    memcpy(out + j, val, vlen);
-                    j += vlen;
-                }
+                /* Copy val into out[j..], respecting the output budget */
+                usize room = max_len - 1 - j;
+                usize vlen = strnlen(val, room);
+                memcpy(out + j, val, vlen);
+                j += vlen;
             }
         } else {
             out[j++] = line[i++];
         }
     }
-    out[j] = 0;
+    out[j] = '\0';
 }
 
 static int shell_parse_line(const char *line, shell_pipeline_t *pipeline) {
@@ -166,61 +151,36 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
     if (cmd->argc == 0) return 0;
     if (strcmp(cmd->argv[0], "echo") == 0) {
         for (int i = 1; i < cmd->argc; i++) {
-            print_str(cmd->argv[i]);
-            if (i < cmd->argc - 1) print_str(" ");
+            kprintf("%s", cmd->argv[i]);
+            if (i < cmd->argc - 1) kprintf(" ");
         }
-        print_str("\r\n");
+        kprintf("\r\n");
         return 0;
     }
     if (strcmp(cmd->argv[0], "cd") == 0) {
         if (cmd->argc > 1) {
             const char *target = cmd->argv[1];
             char new_cwd[MAX_PATH];
-            if (target[0] == '/') {
-                /* Absolute path */
-                usize len = strlen(target);
-                if (len >= MAX_PATH) len = MAX_PATH - 1;
-                memcpy(new_cwd, target, len);
-                new_cwd[len] = 0;
-            } else if (target[0] == '.' && target[1] == '.' && target[2] == 0) {
-                /* Go up one level */
-                memcpy(new_cwd, shell_cwd, MAX_PATH);
-                /* Strip trailing slash if not root */
-                int p = 0; while (new_cwd[p]) p++;
-                if (p > 1 && new_cwd[p-1] == '/') { p--; new_cwd[p] = 0; }
-                /* Find and chop last component */
-                while (p > 0 && new_cwd[p] != '/') p--;
-                if (p == 0) { new_cwd[0] = '/'; new_cwd[1] = 0; }
-                else new_cwd[p] = 0;
-            } else if (target[0] == '.' && target[1] == 0) {
-                /* Stay — no-op */
-                return 0;
-            } else {
-                /* Relative: append to cwd */
-                memcpy(new_cwd, shell_cwd, MAX_PATH);
-                int p = 0; while (new_cwd[p]) p++;
-                if (p > 0 && new_cwd[p-1] != '/' && p < MAX_PATH - 1)
-                    new_cwd[p++] = '/';
-                usize tlen = strlen(target);
-                if (p + (int)tlen < MAX_PATH - 1) {
-                    memcpy(new_cwd + p, target, tlen);
-                    new_cwd[p + tlen] = 0;
-                }
+            /* Join cwd + target, then normalize to handle ".." and "." */
+            if (slibc_path_join(new_cwd, sizeof(new_cwd), shell_cwd, target) < 0) {
+                kprintf("cd: path too long\r\n");
+                return (i64)ENAMETOOLONG;
             }
-            memcpy(shell_cwd, new_cwd, MAX_PATH);
+            slibc_path_normalize(new_cwd);
+            strlcpy(shell_cwd, new_cwd, MAX_PATH);
         } else {
             /* cd with no args goes to root */
-            shell_cwd[0] = '/'; shell_cwd[1] = 0;
+            shell_cwd[0] = '/'; shell_cwd[1] = '\0';
         }
         return 0;
     }
     if (strcmp(cmd->argv[0], "pwd") == 0) {
-        print_str(shell_cwd);
-        print_str("\r\n");
+        kprintf("%s", shell_cwd);
+        kprintf("\r\n");
         return 0;
     }
     if (strcmp(cmd->argv[0], "ls") == 0) {
-        print_str("Directory listing not yet implemented\r\n");
+        kprintf("Directory listing not yet implemented\r\n");
         return 0;
     }
     if (strcmp(cmd->argv[0], "cat") == 0) {
@@ -233,7 +193,7 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
             for (i64 i = 0; i < r; i++) vga_putchar(buf[i]);
         }
         vfs_close(fd);
-        print_str("\r\n");
+        kprintf("\r\n");
         return 0;
     }
     if (strcmp(cmd->argv[0], "ps") == 0) {
@@ -244,7 +204,7 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
         if (cmd->argc >= 3 && strcmp(cmd->argv[1], "=") == 0) {
             shell_set_var(cmd->argv[0], cmd->argv[2]);
         } else if (cmd->argc >= 2) {
-            char *eq = shell_strchr(cmd->argv[1], '=');
+            char *eq = strchr(cmd->argv[1], '=');
             if (eq) {
                 *eq = 0;
                 shell_set_var(cmd->argv[1], eq + 1);
@@ -254,16 +214,15 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
     }
     if (strcmp(cmd->argv[0], "env") == 0) {
         for (int i = 0; i < shell_var_count; i++) {
-            print_str(shell_vars[i].name);
-            print_str("=");
-            print_str(shell_vars[i].value);
-            print_str("\r\n");
+            kprintf("%s", shell_vars[i].name);
+            kprintf("=");
+            kprintf("%s", shell_vars[i].value);
+            kprintf("\r\n");
         }
         return 0;
     }
     if (strcmp(cmd->argv[0], "help") == 0) {
-        print_str("Commands: echo, cd, pwd, ls, cat, ps, ipc, export, env,\r\n");
-        print_str("          lspci, lsusb, help, exit\r\n");
+        kprintf("Commands: echo, cd, pwd, ls, cat, ps, ipc, export, env,\r\n          lspci, lsusb, help, exit\r\n");
         return 0;
     }
     if (strcmp(cmd->argv[0], "lspci") == 0) {
@@ -283,9 +242,9 @@ static i64 shell_exec_cmd(shell_cmd_t *cmd) {
     }
     i64 fd = vfs_open(cmd->argv[0]);
     if (fd < 0) {
-        print_str("Command not found: ");
-        print_str(cmd->argv[0]);
-        print_str("\r\n");
+        kprintf("Command not found: ");
+        kprintf("%s", cmd->argv[0]);
+        kprintf("\r\n");
         return (i64)ENOENT;
     }
     /* Get real file size: seek to end, then seek back to start */
@@ -343,19 +302,18 @@ static i64 shell_exec_pipeline(shell_pipeline_t *pipeline) {
 
 void shell_run(void) {
     shell_init();
-    print_str("\r\nSystrix OS Shell v0.1\r\n");
-    print_str("Type 'help' for commands\r\n\r\n");
+    kprintf("\r\nSystrix OS Shell v0.1\r\nType 'help' for commands\r\n\r\n");
     while (1) {
-        print_str("systrix:");
-        print_str(shell_cwd);
-        print_str("$ ");
+        kprintf("systrix:");
+        kprintf("%s", shell_cwd);
+        kprintf("%s", shell_prompt);
         int pos = 0;
         memset(shell_line, 0, SHELL_MAX_LINE);
         while (1) {
             u8 c = read_key_raw();
             if (c == '\r' || c == '\n') {
                 shell_line[pos] = 0;
-                print_str("\r\n");
+                kprintf("\r\n");
                 break;
             }
             if (c == '\b' && pos > 0) {

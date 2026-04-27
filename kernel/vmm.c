@@ -70,8 +70,9 @@ static u64 *pte_get(u64 cr3, u64 virt, int alloc) {
     /* Split 2 MB huge page if needed */
     if (pd[i2] & (1UL << 7)) {
         if (!alloc) return NULL;
-        u64 huge_phys  = pd[i2] & ~(u64)(2*1024*1024 - 1);
-        u64 huge_flags = (pd[i2] & 0xFFF) & ~(1UL<<7);
+        u64 huge_phys  = pd[i2] & (PTE_PHYS_MASK & ~((u64)0x1FFFFF));
+        u64 huge_flags = (pd[i2] & 0xFFF) | (pd[i2] & (1UL << 63));
+        huge_flags &= ~(1UL << 7); /* clear huge bit */
         u64 pt_phys = pmm_alloc(); if (!pt_phys) return NULL;
         u64 *new_pt = (u64*)pt_phys;
         for (int k = 0; k < 512; k++)
@@ -145,9 +146,11 @@ void vmm_map_kernel(u64 cr3) {
         u64 *kern_pd = (u64*)(kern_pdpt[i3] & PTE_PHYS_MASK);
         u64 new_pd_phys = pmm_alloc(); if (!new_pd_phys) continue;
         memcpy((void*)new_pd_phys, kern_pd, PAGE_SIZE);
-        new_pdpt[i3] = new_pd_phys | (kern_pdpt[i3] & ~PTE_PHYS_MASK) | PTE_USER;
+        u64 flags = (kern_pdpt[i3] & 0xFFF) | (kern_pdpt[i3] & (1UL << 63));
+        new_pdpt[i3] = new_pd_phys | flags | PTE_USER;
     }
-    new_pml4[0] = new_pdpt_phys | (kern_pml4[0] & ~PTE_PHYS_MASK) | PTE_USER;
+    u64 flags0 = (kern_pml4[0] & 0xFFF) | (kern_pml4[0] & (1UL << 63));
+    new_pml4[0] = new_pdpt_phys | flags0 | PTE_USER;
 }
 
 /* ================================================================
@@ -155,31 +158,38 @@ void vmm_map_kernel(u64 cr3) {
  * ================================================================ */
 
 void vmm_destroy(u64 cr3) {
+    if (cr3 < RAM_START || cr3 >= ram_end_actual || (cr3 & (PAGE_SIZE-1))) return;
     u64 *pml4 = (u64*)cr3;
     for (int i4 = 0; i4 < 512; i4++) {
+        watchdog_pet();
         if (!(pml4[i4] & PTE_PRESENT)) continue;
-        u64 *pdpt = (u64*)(pml4[i4] & PTE_PHYS_MASK);
+        u64 pdpt_phys = pml4[i4] & PTE_PHYS_MASK;
+        u64 *pdpt = (u64*)pdpt_phys;
         for (int i3 = 0; i3 < 512; i3++) {
             if (!(pdpt[i3] & PTE_PRESENT)) continue;
             if (pdpt[i3] & (1UL<<7)) continue;
-            u64 *pd = (u64*)(pdpt[i3] & PTE_PHYS_MASK);
+            u64 pd_phys = pdpt[i3] & PTE_PHYS_MASK;
+            u64 *pd = (u64*)pd_phys;
             for (int i2 = 0; i2 < 512; i2++) {
                 if (!(pd[i2] & PTE_PRESENT)) continue;
                 if (pd[i2] & (1UL<<7)) continue;
-                u64 *pt = (u64*)(pd[i2] & PTE_PHYS_MASK);
-                /* Unref user pages (refcount drops, freed when 0) */
+                u64 pt_phys = pd[i2] & PTE_PHYS_MASK;
+                u64 *pt = (u64*)pt_phys;
+                /* Unref user pages */
                 for (int i1 = 0; i1 < 512; i1++) {
-                    if (!(pt[i1] & PTE_PRESENT)) continue;
-                    if (pt[i1] & PTE_USER)
-                        pmm_unref(pt[i1] & PTE_PHYS_MASK);
+                    if ((pt[i1] & PTE_PRESENT) && (pt[i1] & PTE_USER)) {
+                        u64 phys_unref = pt[i1] & PTE_PHYS_MASK;
+                        if (phys_unref >= RAM_START && phys_unref < ram_end_actual)
+                            pmm_unref(phys_unref);
+                    }
                 }
-                pmm_free(pd[i2] & PTE_PHYS_MASK);
+                if (pt_phys >= RAM_START) pmm_free(pt_phys);
             }
-            pmm_free(pdpt[i3] & PTE_PHYS_MASK);
+            if (pd_phys >= RAM_START) pmm_free(pd_phys);
         }
-        pmm_free(pml4[i4] & PTE_PHYS_MASK);
+        if (pdpt_phys >= RAM_START) pmm_free(pdpt_phys);
     }
-    pmm_free(cr3);
+    if (cr3 >= RAM_START) pmm_free(cr3);
 }
 
 /* ================================================================
@@ -404,7 +414,7 @@ void vmm_cow_fork(u64 parent_cr3, u64 child_cr3) {
  * ================================================================ */
 
 void vmm_oom_kill(void) {
-    print_str("[OOM] Out of memory -- killing largest process\r\n");
+    kprintf("[OOM] Out of memory -- killing largest process\r\n");
 
     PCB *victim   = NULL;
     u32  max_rss  = 0;
@@ -435,11 +445,11 @@ void vmm_oom_kill(void) {
         if (rss > max_rss) { max_rss = rss; victim = t; }
     }
 
-    if (!victim) { print_str("[OOM] No victim found -- halting\r\n"); for(;;); }
+    if (!victim) { kprintf("[OOM] No victim found -- halting\r\n"); for(;;); }
 
-    print_str("[OOM] Killing PID ");
+    kprintf("[OOM] Killing PID ");
     vga_putchar((u8)('0' + victim->pid % 10));
-    print_str(" ("); print_str(victim->name); print_str(")\r\n");
+    kprintf(" ("); kprintf("%s", victim->name); kprintf(")\r\n");
 
     vmm_destroy(victim->cr3);
     victim->state = PSTATE_DEAD;

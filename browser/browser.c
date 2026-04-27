@@ -228,7 +228,7 @@ static inline void urlbar_handle_key(int key, char ascii) {
         if (!has_scheme) {
             char tmp[URL_MAX];
             const char *pre = "http://";
-            int pi=0; while(pre[pi]&&pi<8) tmp[pi]=pre[pi++];
+            int pi=0; while(pre[pi]&&pi<8) { tmp[pi]=pre[pi]; pi++; }
             for(int i=0;url_bar[i]&&pi<URL_MAX-1;i++) tmp[pi++]=url_bar[i];
             tmp[pi]=0;
             for(int i=0;i<pi;i++) url_bar[i]=tmp[i];
@@ -309,6 +309,7 @@ int main(void) {
     MouseState prev_mouse; prev_mouse.x=0; prev_mouse.y=0; prev_mouse.buttons=0;
 
     while (1) {
+        watchdog_pet();
         /* Keyboard */
         int key = input_get_key();
         if (key > 0) {

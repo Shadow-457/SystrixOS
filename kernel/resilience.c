@@ -28,21 +28,6 @@
 #include "../include/kernel.h"
 
 /* ================================================================
- *  Utility — decimal/hex printers using ksnprintf
- * ================================================================ */
-static void res_print_u64(u64 n) {
-    char buf[24];
-    ksnprintf(buf, sizeof(buf), "%llu", (unsigned long long)n);
-    print_str(buf);
-}
-
-static void res_print_hex64(u64 v) {
-    char buf[20];
-    ksnprintf(buf, sizeof(buf), "0x%016llx", (unsigned long long)v);
-    print_str(buf);
-}
-
-/* ================================================================
  *  1. SMP — Symmetric Multi-Processing
  *
  *  We locate the LAPIC and AP list by scanning for the ACPI MADT
@@ -186,7 +171,7 @@ static void install_trampoline(void) {
      */
     u8 *t = (u8*)SMP_TRAMPOLINE;
     /* Clear trampoline page */
-    for (int i = 0; i < 0x1000; i++) t[i] = 0;
+    memset(t, 0, 0x1000);
 
     /* Real-mode entry: CLI, set up data seg, jump to protected-mode setup
      * We use the "inline shellcode" technique — write the bytes directly.
@@ -228,7 +213,7 @@ static void install_trampoline(void) {
         0x20, 0x80, 0x00, 0x00,  /* offset 0x8020 */
         0x08, 0x00               /* selector 0x08 */
     };
-    for (usize i = 0; i < sizeof(tramp16); i++) t[i] = tramp16[i];
+    memcpy(t, tramp16, sizeof(tramp16));
 
     /* --- 32-bit PM stub at 0x8020 --- */
     /* Sets up segments, loads PML4, enables long mode */
@@ -252,7 +237,7 @@ static void install_trampoline(void) {
         /* ljmp 0x08:0x8040 (64-bit entry) */
         0x66, 0xEA, 0x40, 0x80, 0x00, 0x00, 0x08, 0x00
     };
-    for (usize i = 0; i < sizeof(tramp32); i++) t[0x20 + i] = tramp32[i];
+    memcpy(t + 0x20, tramp32, sizeof(tramp32));
 
     /* --- 64-bit entry at 0x8040 --- */
     /* mov rsp, [0x80FC]; jmp [0x80F8] (absolute indirect) */
@@ -262,7 +247,7 @@ static void install_trampoline(void) {
         /* jmp qword [rel 0x80F8] */
         0xFF, 0x24, 0x25, 0xF8, 0x80, 0x00, 0x00,
     };
-    for (usize i = 0; i < sizeof(tramp64); i++) t[0x40 + i] = tramp64[i];
+    memcpy(t + 0x40, tramp64, sizeof(tramp64));
 
     /* --- Minimal GDT at 0x8060 --- */
     /* GDT descriptor */
@@ -317,15 +302,13 @@ void smp_init(void) {
     madt_scan();
 
     if (ap_count == 0) {
-        print_str("[SMP] Single-core only (no APs found in MADT)\r\n");
+        kprintf("[SMP] Single-core only (no APs found in MADT)\r\n");
         return;
     }
 
     install_trampoline();
 
-    print_str("[SMP] Bringing up ");
-    res_print_u64((u64)ap_count);
-    print_str(" AP(s)...\r\n");
+    kprintf("[SMP] Bringing up %llu AP(s)...\r\n", (unsigned long long)(ap_count));
 
     int prev_up = smp_cores_up;
 
@@ -347,23 +330,15 @@ void smp_init(void) {
             for (volatile int d = 0; d < 100; d++) {}
         }
         if (smp_cores_up > prev_up) {
-            print_str("[SMP] AP ");
-            res_print_u64((u64)apic_id);
-            print_str(" online (core ");
-            res_print_u64((u64)smp_cores_up - 1);
-            print_str(")\r\n");
+            kprintf("[SMP] AP %llu online (core %llu)\r\n", (unsigned long long)(apic_id), (unsigned long long)(smp_cores_up) - 1);
             prev_up = smp_cores_up;
         } else {
-            print_str("[SMP] AP ");
-            res_print_u64((u64)apic_id);
-            print_str(" did not respond\r\n");
+            kprintf("[SMP] AP %llu did not respond\r\n", (unsigned long long)(apic_id));
         }
     }
 
     smp_total_cpus = smp_cores_up;
-    print_str("[SMP] Total cores: ");
-    res_print_u64((u64)smp_total_cpus);
-    print_str("\r\n");
+    kprintf("[SMP] Total cores: %llu\r\n", (unsigned long long)(smp_total_cpus));
 }
 
 /* Dispatch fn to all idle APs (fire-and-forget, BSP does not wait) */
@@ -386,7 +361,7 @@ void smp_dispatch(void (*fn)(int cpu_id)) {
 void kernel_panic(const char *reason);
 
 void oom_kill(void) {
-    print_str("\r\n[OOM] Out of memory! Scanning for victim...\r\n");
+    kprintf("\r\n[OOM] Out of memory! Scanning for victim...\r\n");
 
     u32  free_before = pmm_free_pages();
     PCB *victim      = (void*)0;
@@ -426,24 +401,16 @@ void oom_kill(void) {
         return;
     }
 
-    print_str("[OOM] Killing PID ");
-    res_print_u64(victim->pid);
-    print_str(" (");
-    print_str(victim->name);
-    print_str(") RSS=");
-    res_print_u64((u64)best_score);
-    print_str(" pages\r\n");
+    kprintf("[OOM] Killing PID %llu (", (unsigned long long)(victim->pid));
+    kprintf("%s", victim->name);
+    kprintf(") RSS=%llu pages\r\n", (unsigned long long)(best_score));
 
     /* Mark dead — scheduler will skip it; vmm_destroy frees pages */
     victim->state = PSTATE_DEAD;
     if (victim->cr3) vmm_destroy(victim->cr3);
 
     u32 free_after = pmm_free_pages();
-    print_str("[OOM] Freed ");
-    res_print_u64((u64)(free_after - free_before));
-    print_str(" pages. Free now: ");
-    res_print_u64((u64)free_after);
-    print_str("\r\n");
+    kprintf("[OOM] Freed %llu pages. Free now: %llu\r\n", (unsigned long long)(free_after - free_before), (unsigned long long)(free_after));
 
     if (free_after == free_before)
         kernel_panic("OOM: killed process but freed no pages");
@@ -465,18 +432,14 @@ void kernel_panic(const char *reason) {
 
     if (panic_depth++ > 0) {
         /* Double panic — give up */
-        print_str("[PANIC] Double panic -- system halted\r\n");
+        kprintf("[PANIC] Double panic -- system halted\r\n");
         for (;;) __asm__ volatile("hlt");
     }
 
     /* Print banner */
-    print_str("\r\n");
-    print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
-    print_str("!!         K E R N E L  P A N I C       !!\r\n");
-    print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
-    print_str("Reason: ");
-    print_str(reason ? reason : "(null)");
-    print_str("\r\n");
+    kprintf("\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n!!         K E R N E L  P A N I C       !!\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\nReason: ");
+    kprintf("%s", reason ? reason : "(null)");
+    kprintf("\r\n");
 
     /* Register dump */
     u64 rsp, rip, cr3_val, cr2_val;
@@ -485,20 +448,16 @@ void kernel_panic(const char *reason) {
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3_val));
     __asm__ volatile("mov %%cr2, %0" : "=r"(cr2_val));
 
-    print_str("  RSP="); res_print_hex64(rsp);
-    print_str("  RIP="); res_print_hex64(rip);
-    print_str("\r\n");
-    print_str("  CR3="); res_print_hex64(cr3_val);
-    print_str("  CR2="); res_print_hex64(cr2_val);
-    print_str("\r\n");
+    kprintf("  RSP="); kprintf("0x%016llx", (unsigned long long)(rsp));
+    kprintf("  RIP="); kprintf("0x%016llx", (unsigned long long)(rip));
+    kprintf("\r\n");
+    kprintf("  CR3="); kprintf("0x%016llx", (unsigned long long)(cr3_val));
+    kprintf("  CR2="); kprintf("0x%016llx", (unsigned long long)(cr2_val));
+    kprintf("\r\n");
 
     /* Memory stats */
     u32 fp = pmm_free_pages();
-    print_str("  Free pages: ");
-    res_print_u64((u64)fp);
-    print_str(" (");
-    res_print_u64((u64)(fp * 4));
-    print_str(" KB)\r\n");
+    kprintf("  Free pages: %llu (%llu KB)\r\n", (unsigned long long)(fp), (unsigned long long)(fp * 4));
 
     /* Try soft recovery: kill the currently running process */
     PCB *cur = (void*)0;
@@ -509,15 +468,13 @@ void kernel_panic(const char *reason) {
     }
 
     if (cur) {
-        print_str("[PANIC] Attempting soft recovery: killing PID ");
-        res_print_u64(cur->pid);
-        print_str(" ("); print_str(cur->name); print_str(")\r\n");
+        kprintf("[PANIC] Attempting soft recovery: killing PID %llu", (unsigned long long)(cur->pid));
+        kprintf(" ("); kprintf("%s", cur->name); kprintf(")\r\n");
 
         cur->state = PSTATE_DEAD;
         if (cur->cr3) vmm_destroy(cur->cr3);
 
-        print_str("[PANIC] Recovery attempted. Resuming kernel.\r\n");
-        print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
+        kprintf("[PANIC] Recovery attempted. Resuming kernel.\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
 
         panic_depth = 0;
         __asm__ volatile("sti");
@@ -525,8 +482,7 @@ void kernel_panic(const char *reason) {
     }
 
     /* No recoverable process — hard halt */
-    print_str("[PANIC] No user process to kill. System halted.\r\n");
-    print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
+    kprintf("[PANIC] No user process to kill. System halted.\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
     for (;;) __asm__ volatile("hlt");
 }
 
@@ -550,7 +506,7 @@ void kernel_panic(const char *reason) {
  *  and re-armed with watchdog_resume() for known-long operations.
  * ================================================================ */
 
-#define WD_TIMEOUT_MS  5000   /* 5 seconds without a pet = hang */
+#define WD_TIMEOUT_MS  30000  /* 30 seconds without a pet = hang */
 
 static volatile u32 wd_counter   = 0;
 static volatile int wd_suspended = 0;
@@ -560,9 +516,7 @@ void watchdog_init(void) {
     wd_counter   = 0;
     wd_suspended = 0;
     wd_enabled   = 1;
-    print_str("[WD] Watchdog armed (timeout=");
-    res_print_u64(WD_TIMEOUT_MS);
-    print_str("ms)\r\n");
+    kprintf("[WD] Watchdog armed (timeout=%llums)\r\n", (unsigned long long)(WD_TIMEOUT_MS));
 }
 
 /* Call from any kernel subsystem to signal "still alive" */
@@ -588,9 +542,8 @@ void watchdog_tick(void) {
         PCB *t = (PCB*)p;
         if (t->state == PSTATE_RUNNING && t->pid != 0) {
             /* Kill it */
-            print_str("\r\n[WD] TIMEOUT: killing hung PID ");
-            res_print_u64(t->pid);
-            print_str(" ("); print_str(t->name); print_str(")\r\n");
+            kprintf("\r\n[WD] TIMEOUT: killing hung PID %llu", (unsigned long long)(t->pid));
+            kprintf(" ("); kprintf("%s", t->name); kprintf(")\r\n");
             t->state = PSTATE_DEAD;
             if (t->cr3) vmm_destroy(t->cr3);
             return;

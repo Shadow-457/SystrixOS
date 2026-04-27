@@ -95,7 +95,7 @@ void pmm_init(void) {
         if (highest < 0x4000000UL) highest = 0x4000000UL;
     }
 
-    if (highest > RAM_END_MAX) highest = RAM_END_MAX;
+    if (highest > 0x40000000UL) highest = 0x40000000UL; /* cap at 1 GB identity map limit */
     ram_end_actual = highest;
     total_pages    = (u32)((highest - RAM_START) / PAGE_SIZE);
 
@@ -193,7 +193,10 @@ u8 pmm_refcount(u64 phys) {
 
 u32 pmm_free_pages(void) {
     u32 free = 0;
-    for (u32 i = 0; i < total_pages; i++) if (bfree_tst(i)) free++;
+    for (u32 i = 0; i < total_pages; i++) {
+        if (bfree_tst(i)) free++;
+        if ((i & 1023) == 0) watchdog_pet();
+    }
     return free;
 }
 

@@ -445,28 +445,30 @@ syscall_table:
     .quad sys_close             # 3
     .quad sys_exit_handler      # 4
     .quad sys_malloc            # 5  malloc (libc calls syscall 5 for heap alloc)
-    .quad sys_free              # 6
+    .quad sys_lstat             # 6  lstat
     .quad sys_poll              # 7  poll
     .quad sys_lseek             # 8
     .quad sys_mmap              # 9
     .quad sys_mprotect          # 10
     .quad sys_munmap            # 11
     .quad sys_brk               # 12
-    .quad sys_stub              # 13 rt_sigaction
-    .quad sys_stub              # 14 rt_sigprocmask
+    .quad sys_sigaction         # 13 rt_sigaction
+    .quad sys_sigprocmask       # 14 rt_sigprocmask
     .quad 0                     # 15 rt_sigreturn (stub)
-    .quad 0                     # 16 ioctl (stub)
+    .quad sys_ioctl             # 16 ioctl
     .quad 0                     # 17 pread64 (stub)
     .quad 0                     # 18 pwrite64 (stub)
     .quad 0                     # 19 readv (stub)
     .quad sys_writev            # 20 writev
-    .quad 0                     # 21 access (stub)
+    .quad sys_access            # 21 access
     .quad sys_pipe              # 22 pipe
     .quad sys_select; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 23-30
     .quad 0                     # 31 tgkill (stub)
     .quad sys_dup               # 32
     .quad sys_dup2              # 33 dup2
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 34-38
+    .quad 0                     # 34
+    .quad sys_nanosleep         # 35 nanosleep
+    .quad 0; .quad 0; .quad 0   # 36-38
     .quad sys_getpid            # 39
     .quad 0                     # 40
     .quad sys_socket            # 41 socket
@@ -491,24 +493,29 @@ syscall_table:
     .quad 0; .quad 0; .quad 0; .quad 0   # 73-76
     .quad sys_getdents64        # 77 getdents
     .quad sys_getdents64        # 78 getdents64
-    .quad sys_getcwd            # 79
-    .quad sys_stub              # 80 chdir
+    .quad sys_getcwd_real       # 79 getcwd (real cwd)
+    .quad sys_chdir             # 80 chdir
     .quad 0                     # 81
     .quad sys_rename            # 82
     .quad sys_mkdir             # 83
     .quad sys_rmdir             # 84
     .quad 0; .quad 0            # 85-86
     .quad sys_unlink            # 87
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 88-95
+    .quad 0                     # 88
+    .quad sys_readlink          # 89 readlink
+    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 90-95
     .quad sys_gettimeofday      # 96
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 97-101
+    .quad 0; .quad 0             # 97-98
+    .quad sys_sysinfo           # 99 sysinfo
+    .quad 0; .quad 0             # 100-101
     .quad sys_getuid            # 102
     .quad 0                     # 103
     .quad sys_getuid            # 104 getgid
     .quad 0; .quad 0            # 105-106
     .quad sys_getuid            # 107 geteuid
     .quad sys_getuid            # 108 getegid
-    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 109-116
+    .quad sys_getppid           # 110 (getppid)
+    .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 110-116
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 117-124
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 125-132
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 133-140
@@ -569,12 +576,13 @@ syscall_table:
     .quad sys_ipc_register  # 331
     .quad sys_ipc_lookup    # 332
     .quad sys_net_dns               # 333
-    .quad 0; .quad 0; .quad 0                               # 334-336
+    .quad sys_vga_clear; .quad sys_read_char; .quad 0             # 334-336
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0; .quad 0   # 337-344
     .quad 0; .quad 0; .quad 0; .quad 0; .quad 0                               # 345-349
     .quad sys_pkg_install       # 350
     .quad sys_pkg_remove        # 351
     .quad sys_pkg_list          # 352
+    .quad sys_watchdog_pet      # 353
 .align 8
 current_pid:        .quad 0
 pit_ticks:          .quad 0
@@ -594,6 +602,7 @@ kernel_return_rsp:  .quad 0
 .extern sys_gettime_ms, sys_mouse_setmode
 .extern sys_ipc_send, sys_ipc_recv, sys_ipc_register, sys_ipc_lookup
 .extern sys_poll_keys, sys_poll_mouse, sys_poll_pad
+.extern sys_vga_clear, sys_read_char
 .extern sys_poll, sys_select, sys_fcntl
 .extern sys_epoll_create, sys_epoll_ctl, sys_epoll_wait
 .extern sys_gfx_flip, sys_gfx_clear, sys_gfx_blit, sys_gfx_set_colorkey
@@ -606,4 +615,8 @@ kernel_return_rsp:  .quad 0
 .extern sys_send, sys_recv, sys_close_socket
 .extern sys_fork, sys_execve, sys_clone, sys_wait4, sys_exit_group
 .extern sys_pkg_install, sys_pkg_remove, sys_pkg_list
-.extern sys_net_dns
+.extern sys_net_dns, sys_watchdog_pet
+.extern sys_lstat, sys_ioctl, sys_access, sys_nanosleep
+.extern sys_chdir, sys_readlink, sys_sysinfo, sys_getppid
+.extern sys_sigaction, sys_sigprocmask, sys_stat
+.extern sys_getcwd_real

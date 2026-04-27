@@ -258,7 +258,7 @@ static void xhci_poll_one(Xhci *x){
             u8 *buf=(u8*)(usize)in_trb->param;
             if(x->hid_type==0) decode_kbd(buf,x->hid_prev);
             else               decode_mouse(buf,x->hid_prev);
-            for(int i=0;i<8;i++) x->hid_prev[i]=buf[i];
+            memcpy(x->hid_prev, buf, 8);
             /* Re-arm */
             in_trb->status=8;
             in_trb->ctrl=TRB_TYPE(TRB_NORMAL)|TRB_CYCLE|TRB_IOC|(u32)(x->hid_pcs);
@@ -340,7 +340,7 @@ void usb_hid_init(void){
                 x->n_slots=(*(volatile u32*)(x->mmio+XHCI_HCSPARAMS1))&0xFF;
                 x->n_ports=(*(volatile u32*)(x->mmio+XHCI_HCSPARAMS1))>>24;
 
-                if(xhci_reset(x)) { print_str("[XHCI] reset fail\r\n"); continue; }
+                if(xhci_reset(x)) { kprintf("[XHCI] reset fail\r\n"); continue; }
 
                 /* Allocate DCBAA */
                 x->dcbaa=(u64*)dma_alloc((x->n_slots+1)*8,64,&x->dcbaa_phys);
@@ -385,7 +385,7 @@ void usb_hid_init(void){
                 x->active=1;
                 g_n_xhci++;
 
-                print_str("[XHCI] init OK ");print_hex_byte((u8)x->n_ports);print_str(" ports\r\n");
+                kprintf("[XHCI] init OK ");print_hex_byte((u8)x->n_ports);kprintf(" ports\r\n");
             }
             /* UHCI/OHCI/EHCI: BIOS legacy PS/2 emulation — no action needed */
         }

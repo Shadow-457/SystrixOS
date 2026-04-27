@@ -6,12 +6,28 @@
  * ================================================================ */
 
 /* ── Basic types ─────────────────────────────────────────────── */
+#define _SYSTRIX_KERNEL_TYPES_DEFINED
 typedef unsigned char      u8;
 typedef unsigned short     u16;
 typedef unsigned int       u32;
 typedef unsigned long long u64;
 typedef signed   long long i64;
 typedef u64                usize;
+
+/* syslibc stdint aliases — needed before systrix_libc.h is pulled in */
+typedef u8   uint8_t;
+typedef u16  uint16_t;
+typedef u32  uint32_t;
+typedef u64  uint64_t;
+typedef signed char       int8_t;
+typedef signed short      int16_t;
+typedef signed int        int32_t;
+typedef signed long long  int64_t;
+typedef u64               size_t;
+typedef i64               ssize_t;
+typedef u64               uintptr_t;
+typedef i64               intptr_t;
+typedef i64               ptrdiff_t;
 
 #define NULL  ((void*)0)
 #define true  1
@@ -20,7 +36,7 @@ typedef u64                usize;
 /* ── Memory layout constants ─────────────────────────────────── */
 #define HEAP_BASE     0x200000UL   /* 2 MB */
 #define HEAP_SIZE     0x200000UL   /* 2 MB */
-#define PMM_BITMAP    0x600000UL
+#define PMM_BITMAP    0x1000000UL   /* 16 MB */
 #define PMM_BMP_SZ    8192
 #define PAGE_SIZE     4096
 #define RAM_START     0x400000UL
@@ -29,7 +45,7 @@ typedef u64                usize;
  * RAM_END_MAX is the compile-time ceiling for static array sizing.
  * Raised to 64 GB so the buddy bitmap and refcount arrays cover the
  * full 64-bit physical address space seen in practice on x86-64. */
-#define RAM_END_MAX   0x1000000000UL  /* 64 GB ceiling (64-bit) */
+#define RAM_END_MAX   0x40000000UL  /* 1 GB ceiling */
 extern u64 ram_end_actual;            /* set by pmm_init()           */
 #define RAM_END       ram_end_actual
 /* TOTAL_PAGES: compile-time upper bound for static sizing only.
@@ -82,10 +98,10 @@ typedef struct {
 #define PROC_PCB_SIZE  128
 #define PROC_MAX       64
 #define PROC_KSTACK_SZ 4096
-#define PROC_STACK_TOP 0x700000UL
-#define BRK_BASE       0x1000000UL
-#define BRK_MAX        0x4000000UL
-#define MMAP_BASE      0x2000000UL
+#define PROC_STACK_TOP 0x2000000UL
+#define BRK_BASE       0x4000000UL     /* 64 MB */
+#define BRK_MAX        0x8000000UL     /* 128 MB */
+#define MMAP_BASE      0x8000000UL     /* 128 MB */
 
 #define PSTATE_EMPTY   0
 #define PSTATE_READY   1
@@ -238,6 +254,9 @@ typedef struct {
 #define PF_R  4   /* segment is readable   */
 
 /* ── Linux-compatible error codes ───────────────────────────── */
+/* Set the guard so systrix_libc.h's errno block is skipped when
+ * this kernel header is included first (it already provides these). */
+#define _SYSTRIX_ERRNO_DEFINED
 #define EPERM    (-1LL)
 #define ENOENT   (-2LL)
 #define EBADF    (-9LL)
@@ -245,6 +264,7 @@ typedef struct {
 #define EFAULT   (-14LL)
 #define EINVAL   (-22LL)
 #define ENOSYS   (-38LL)
+#define ERANGE   (-34LL)
 
 /* ── arch_prctl codes ─────────────────────────────────────────── */
 #define ARCH_SET_FS  0x1002
@@ -496,7 +516,7 @@ i64  elf_load(void *data, usize size, const char *name);
 void scheduler_init(void);
 void scheduler_start(void);
 extern u64 current_pid;
-extern u64 pit_ticks;
+extern volatile u64 pit_ticks;
 
 /* kernel.c  – VGA */
 void vga_clear(void);
@@ -506,6 +526,7 @@ void vga_scroll_up(void);
 void vga_scroll_down(void);
 void print_str(const char *s);
 void print_hex_byte(u8 v);
+void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* kernel.c  – ATA */
 void ata_read_sector(u32 lba, void *buf);
@@ -543,6 +564,8 @@ u8   read_key_raw(void);  /* polled PS/2 keyboard — used by sys_read stdin */
 void net_init(void);
 void net_start(void);             /* init + DHCP, called from kernel_main */
 void net_poll(void);              /* call from shell to process incoming packets */
+void net_ip_send(u32 dst_ip, u8 proto, const void *payload, u16 plen);
+void net_udp_send(u32 dst_ip, u16 src_port, u16 dst_port, const void *payload, u16 plen);
 int  net_ping(u32 ip);           /* send ICMP echo, returns 1 if reply received */
 u32  net_dns_resolve(const char *hostname); /* DNS A lookup, returns 0 on fail */
 int  net_http_get(u32 ip, u16 port, const char *path, void *buf, usize bufsz);
@@ -594,6 +617,8 @@ void  gui_redraw(void);
 void  gui_cursor_move(int dx, int dy);
 void  gui_cursor_get(int *out_x, int *out_y);
 void  gui_handle_click(int px, int py);
+void  gui_handle_mouse_down(int px, int py);
+void  gui_handle_mouse_up(int px, int py);
 void  gui_handle_right_click(int px, int py);
 void  gui_handle_drag(int px, int py);
 void  gui_stop_drag(void);
@@ -808,6 +833,16 @@ i64  sys_writev(u64 fd, const void *iov, u64 cnt);
 i64  sys_getpid(void);
 i64  sys_uname(void *buf);
 i64  sys_getcwd(char *buf, usize sz);
+i64  sys_getcwd_real(char *buf, usize sz);
+i64  sys_chdir(const char *path);
+i64  sys_lstat(const char *path, void *statbuf);
+i64  sys_stat(const char *path, void *statbuf);
+i64  sys_access(const char *path, int mode);
+i64  sys_readlink(const char *path, char *buf, usize bufsz);
+i64  sys_ioctl(u64 fd, u64 req, void *arg);
+i64  sys_nanosleep(const void *req, void *rem);
+i64  sys_sysinfo(void *info);
+i64  sys_getppid(void);
 i64  sys_gettimeofday(void *tv, void *tz);
 i64  sys_getuid(void);
 i64  sys_arch_prctl(u64 code, u64 addr);
@@ -1018,6 +1053,7 @@ i64  pkg_remove(const char *name);
 #define SYS_PKG_INSTALL 350
 #define SYS_PKG_REMOVE  351
 #define SYS_PKG_LIST    352
+#define SYS_WATCHDOG_PET 353
 
 #define ENAMETOOLONG (-36LL)
 #define ECHILD       (-10LL)
@@ -1129,249 +1165,31 @@ static inline void cli(void)  { __asm__ volatile("cli"); }
 static inline void hlt(void)  { __asm__ volatile("hlt"); }
 static inline void io_wait(void) { outb(0x80, 0); }
 
-/* ── Common utility macros ───────────────────────────────────── */
+/* ================================================================
+ *  Syslibc — shared kernel+user C library
+ *  Provides: mem*, str*, char class, atoi/strtol, snprintf,
+ *            qsort/bsearch, setjmp/longjmp, bit math, and more.
+ *  Compiled with the same -ffreestanding -nostdlib flags as kernel.
+ * ================================================================ */
+#include "../libc/systrix_libc.h"
+
+/* ── slibc integer-to-string short aliases ───────────────────────
+ * slibc_u64_to_dec / slibc_u64_to_hex are the canonical names;
+ * these short aliases let call sites stay concise.                */
+#define u64_to_dec   slibc_u64_to_dec
+#define u64_to_hex   slibc_u64_to_hex
+
+/* MIN/MAX/CLAMP/ARRAY_SIZE — guard against syslibc redefinition    */
+#ifndef MIN
 #define MIN(a, b)         ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
 #define MAX(a, b)         ((a) > (b) ? (a) : (b))
+#endif
+#ifndef CLAMP
 #define CLAMP(v, lo, hi)  ((v) < (lo) ? (lo) : (v) > (hi) ? (hi) : (v))
+#endif
 #define ARRAY_SIZE(a)     (sizeof(a) / sizeof((a)[0]))
-#define ALIGN_UP(v, a)    (((v) + (a) - 1) & ~((a) - 1))
-#define ALIGN_DOWN(v, a)  ((v) & ~((a) - 1))
-#define BIT(n)            (1UL << (n))
-#define IS_POWER_OF_2(n)  ((n) && !((n) & ((n) - 1)))
-#define UNUSED(x)         ((void)(x))
-
-/* ── Memory utilities ────────────────────────────────────────── */
-static inline void memset(void *dst, u8 val, usize n) {
-    u8 *p = (u8*)dst;
-    for (usize i = 0; i < n; i++) p[i] = val;
-}
-static inline void memcpy(void *dst, const void *src, usize n) {
-    u8 *d = (u8*)dst; const u8 *s = (const u8*)src;
-    for (usize i = 0; i < n; i++) d[i] = s[i];
-}
-/* memmove: safe even when src and dst overlap */
-static inline void memmove(void *dst, const void *src, usize n) {
-    u8 *d = (u8*)dst; const u8 *s = (const u8*)src;
-    if (d < s || d >= s + n)
-        for (usize i = 0; i < n; i++) d[i] = s[i];
-    else
-        for (usize i = n; i-- > 0;) d[i] = s[i];
-}
-static inline int memcmp(const void *a, const void *b, usize n) {
-    const u8 *p = (const u8*)a, *q = (const u8*)b;
-    for (usize i = 0; i < n; i++)
-        if (p[i] != q[i]) return (int)p[i] - (int)q[i];
-    return 0;
-}
-static inline void *memchr(const void *s, u8 c, usize n) {
-    const u8 *p = (const u8*)s;
-    for (usize i = 0; i < n; i++)
-        if (p[i] == c) return (void*)(p + i);
-    return NULL;
-}
-
-/* ── String utilities ────────────────────────────────────────── */
-static inline usize strlen(const char *s) {
-    usize n = 0; while (s[n]) n++; return n;
-}
-static inline int strcmp(const char *a, const char *b) {
-    while (*a && *a == *b) { a++; b++; }
-    return (u8)*a - (u8)*b;
-}
-static inline int strncmp(const char *a, const char *b, usize n) {
-    while (n-- && *a && *a == *b) { a++; b++; }
-    return n == (usize)-1 ? 0 : (u8)*a - (u8)*b;
-}
-static inline char *strcpy(char *dst, const char *src) {
-    char *d = dst;
-    while ((*d++ = *src++)) {}
-    return dst;
-}
-static inline char *strncpy(char *dst, const char *src, usize n) {
-    usize i;
-    for (i = 0; i < n && src[i]; i++) dst[i] = src[i];
-    for (; i < n; i++) dst[i] = '\0';
-    return dst;
-}
-/* strlcpy: always NUL-terminates, returns strlen(src) */
-static inline usize strlcpy(char *dst, const char *src, usize sz) {
-    usize i = 0;
-    if (sz > 0) {
-        for (; i < sz - 1 && src[i]; i++) dst[i] = src[i];
-        dst[i] = '\0';
-    }
-    while (src[i]) i++;
-    return i;
-}
-static inline char *strcat(char *dst, const char *src) {
-    char *d = dst;
-    while (*d) d++;
-    while ((*d++ = *src++)) {}
-    return dst;
-}
-/* strlcat: safe bounded concatenation, returns total length */
-static inline usize strlcat(char *dst, const char *src, usize sz) {
-    usize dl = 0;
-    while (dl < sz && dst[dl]) dl++;
-    usize sl = 0;
-    while (dl + sl + 1 < sz && src[sl]) { dst[dl + sl] = src[sl]; sl++; }
-    if (dl < sz) dst[dl + sl] = '\0';
-    while (src[sl]) sl++;
-    return dl + sl;
-}
-static inline char *strchr(const char *s, int c) {
-    for (; *s; s++)
-        if ((u8)*s == (u8)c) return (char*)s;
-    return (c == '\0') ? (char*)s : NULL;
-}
-static inline char *strrchr(const char *s, int c) {
-    const char *last = NULL;
-    for (; *s; s++)
-        if ((u8)*s == (u8)c) last = s;
-    return (char*)last;
-}
-static inline char *strstr(const char *hay, const char *needle) {
-    if (!*needle) return (char*)hay;
-    for (; *hay; hay++) {
-        const char *h = hay, *n = needle;
-        while (*h && *n && *h == *n) { h++; n++; }
-        if (!*n) return (char*)hay;
-    }
-    return NULL;
-}
-
-/* ── Integer conversion ──────────────────────────────────────── */
-static inline int atoi(const char *s) {
-    while (*s == ' ' || *s == '\t') s++;
-    int neg = (*s == '-'); if (neg || *s == '+') s++;
-    int v = 0;
-    while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');
-    return neg ? -v : v;
-}
-static inline long strtol(const char *s, char **end, int base) {
-    while (*s == ' ' || *s == '\t') s++;
-    int neg = (*s == '-'); if (neg || *s == '+') s++;
-    if (base == 0) {
-        if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
-        else if (s[0] == '0') { base = 8; s++; }
-        else base = 10;
-    } else if (base == 16 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
-    long v = 0;
-    for (;;) {
-        int d;
-        if (*s >= '0' && *s <= '9') d = *s - '0';
-        else if (*s >= 'a' && *s <= 'z') d = *s - 'a' + 10;
-        else if (*s >= 'A' && *s <= 'Z') d = *s - 'A' + 10;
-        else break;
-        if (d >= base) break;
-        v = v * base + d; s++;
-    }
-    if (end) *end = (char*)s;
-    return neg ? -v : v;
-}
-static inline unsigned long strtoul(const char *s, char **end, int base) {
-    return (unsigned long)strtol(s, end, base);
-}
-
-/* ── snprintf / sprintf (kernel-only, no FP support) ─────────── *
- * Supported: %d %i %u %x %X %o %c %s %p %%                      *
- * Width (e.g. %5d), left-justify (%-5d), zero-pad (%05d).        */
-static inline int k_vsnprintf(char *buf, usize sz, const char *fmt, __builtin_va_list ap) {
-    usize pos = 0;
-#define _PUTC(c) do { if (pos + 1 < sz) buf[pos++] = (c); } while (0)
-    while (*fmt) {
-        if (*fmt != '%') { _PUTC(*fmt++); continue; }
-        fmt++;
-        /* flags */
-        int left = 0, zero = 0;
-        while (*fmt == '-' || *fmt == '0') {
-            if (*fmt == '-') left = 1; else zero = 1; fmt++;
-        }
-        /* width */
-        int width = 0;
-        while (*fmt >= '0' && *fmt <= '9') width = width * 10 + (*fmt++ - '0');
-        /* length modifier */
-        int lng = 0;
-        if (*fmt == 'l') { lng = 1; fmt++; if (*fmt == 'l') { lng = 2; fmt++; } }
-        char spec = *fmt++;
-        if (spec == '%') { _PUTC('%'); continue; }
-        if (spec == 'c') { _PUTC((char)__builtin_va_arg(ap, int)); continue; }
-        if (spec == 's') {
-            const char *sv = __builtin_va_arg(ap, const char*);
-            if (!sv) sv = "(null)";
-            int sl = 0; while (sv[sl]) sl++;
-            if (!left) for (int i = sl; i < width; i++) _PUTC(' ');
-            for (int i = 0; sv[i]; i++) _PUTC(sv[i]);
-            if (left)  for (int i = sl; i < width; i++) _PUTC(' ');
-            continue;
-        }
-        /* numeric */
-        u64 uval; int neg = 0;
-        if (spec == 'd' || spec == 'i') {
-            i64 sv = (lng == 2) ? __builtin_va_arg(ap, long long)
-                   : (lng == 1) ? __builtin_va_arg(ap, long)
-                                : __builtin_va_arg(ap, int);
-            if (sv < 0) { neg = 1; uval = (u64)(-sv); } else uval = (u64)sv;
-        } else if (spec == 'p') {
-            uval = (u64)(usize)__builtin_va_arg(ap, void*);
-            spec = 'x'; /* treat as hex */
-        } else {
-            uval = (lng == 2) ? __builtin_va_arg(ap, unsigned long long)
-                 : (lng == 1) ? __builtin_va_arg(ap, unsigned long)
-                              : __builtin_va_arg(ap, unsigned int);
-        }
-        unsigned int base = (spec == 'x' || spec == 'X') ? 16
-                          : (spec == 'o') ? 8 : 10;
-        const char *digs = (spec == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
-        char tmp[24]; int tlen = 0;
-        if (uval == 0) { tmp[tlen++] = '0'; }
-        else { u64 v = uval; while (v) { tmp[tlen++] = digs[v % base]; v /= base; } }
-        if (neg) tmp[tlen++] = '-';
-        char pad = (zero && !left) ? '0' : ' ';
-        int total = tlen + (spec == 'p' ? 2 : 0);
-        if (!left) for (int i = total; i < width; i++) _PUTC(pad);
-        if (spec == 'p') { _PUTC('0'); _PUTC('x'); }
-        for (int i = tlen - 1; i >= 0; i--) _PUTC(tmp[i]);
-        if (left)  for (int i = total; i < width; i++) _PUTC(' ');
-    }
-#undef _PUTC
-    if (sz) buf[pos < sz ? pos : sz - 1] = '\0';
-    return (int)pos;
-}
-static inline int ksnprintf(char *buf, usize sz, const char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
-static inline int ksnprintf(char *buf, usize sz, const char *fmt, ...) {
-    __builtin_va_list ap; __builtin_va_start(ap, fmt);
-    int r = k_vsnprintf(buf, sz, fmt, ap);
-    __builtin_va_end(ap);
-    return r;
-}
-static inline int ksprintf(char *buf, const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));
-static inline int ksprintf(char *buf, const char *fmt, ...) {
-    __builtin_va_list ap; __builtin_va_start(ap, fmt);
-    int r = k_vsnprintf(buf, (usize)-1, fmt, ap);
-    __builtin_va_end(ap);
-    return r;
-}
-
-/* ── Integer helpers ─────────────────────────────────────────── */
-/* u64_to_str: write decimal digits into buf (must be ≥20 bytes); returns length */
-static inline int u64_to_dec(u64 v, char *buf) {
-    if (v == 0) { buf[0] = '0'; buf[1] = '\0'; return 1; }
-    char tmp[20]; int n = 0;
-    while (v) { tmp[n++] = (char)('0' + v % 10); v /= 10; }
-    for (int i = 0; i < n; i++) buf[i] = tmp[n - 1 - i];
-    buf[n] = '\0'; return n;
-}
-static inline int u64_to_hex(u64 v, char *buf) {
-    if (v == 0) { buf[0] = '0'; buf[1] = '\0'; return 1; }
-    const char *d = "0123456789abcdef";
-    char tmp[16]; int n = 0;
-    while (v) { tmp[n++] = d[v & 0xF]; v >>= 4; }
-    for (int i = 0; i < n; i++) buf[i] = tmp[n - 1 - i];
-    buf[n] = '\0'; return n;
-}
 
 /* ── poll / epoll structs ──────────────────────────────────────── */
 typedef struct {

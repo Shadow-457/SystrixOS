@@ -270,6 +270,11 @@ static inline void mouse_setrelative(int on) {
         : : "a"(328LL), "D"((long long)on) : "rcx","r11","memory");
 }
 
+static inline void watchdog_pet(void) {
+    __asm__ volatile("syscall"
+        : : "a"(353LL) : "rcx","r11","memory");
+}
+
 /* ── setjmp / longjmp ────────────────────────────────────────── */
 /*
  * jmp_buf saves the 6 callee-saved registers + rsp + rip (return
@@ -536,3 +541,221 @@ struct lconv {
 
 char        *setlocale(int category, const char *locale);
 struct lconv *localeconv(void);
+
+/* ================================================================
+ *  POSIX types and structs for Lynx / browser support
+ * ================================================================ */
+
+/* stat */
+struct stat {
+    unsigned long  st_dev;
+    unsigned long  st_ino;
+    unsigned int   st_mode;
+    unsigned int   st_nlink;
+    unsigned int   st_uid;
+    unsigned int   st_gid;
+    unsigned long  st_rdev;
+    long           st_size;
+    long           st_blksize;
+    long           st_blocks;
+    long           st_atime;
+    long           st_mtime;
+    long           st_ctime;
+    unsigned char  _pad[24];
+};
+
+/* timespec */
+struct timespec {
+    long tv_sec;
+    long tv_nsec;
+};
+
+/* timeval */
+struct timeval {
+    long tv_sec;
+    long tv_usec;
+};
+
+/* sigset */
+typedef unsigned long sigset_t;
+#define SIG_DFL ((void*)0)
+#define SIG_IGN ((void*)1)
+#define SIG_ERR ((void*)-1)
+
+#define SIGINT   2
+#define SIGQUIT  3
+#define SIGILL   4
+#define SIGABRT  6
+#define SIGFPE   8
+#define SIGKILL  9
+#define SIGSEGV  11
+#define SIGPIPE  13
+#define SIGALRM  14
+#define SIGTERM  15
+#define SIGCHLD  17
+#define SIGCONT  18
+#define SIGSTOP  19
+#define SIGWINCH 28
+
+/* sigaction */
+struct sigaction {
+    void    (*sa_handler)(int);
+    unsigned long sa_flags;
+    void    (*sa_restorer)(void);
+    sigset_t sa_mask;
+};
+
+/* rlimit */
+struct rlimit {
+    unsigned long rlim_cur;
+    unsigned long rlim_max;
+};
+
+#define RLIMIT_NOFILE   7
+#define RLIMIT_STACK    3
+#define RLIMIT_AS      9
+
+/* tms / times() */
+typedef long clock_t;
+struct tms {
+    clock_t tms_utime;
+    clock_t tms_stime;
+    clock_t tms_cutime;
+    clock_t tms_cstime;
+};
+
+/* rusage */
+struct rusage {
+    struct timeval ru_utime;
+    struct timeval ru_stime;
+    long ru_maxrss, ru_ixrss, ru_idrss, ru_isrss;
+    long ru_minflt, ru_majflt, ru_nswap, ru_inblock;
+    long ru_oublock, ru_msgsnd, ru_msgrcv, ru_nsignals;
+    long ru_nvcsw, ru_nivcsw;
+};
+
+/* utsname */
+struct utsname {
+    char sysname[65];
+    char nodename[65];
+    char release[65];
+    char version[65];
+    char machine[65];
+};
+
+/* sysinfo */
+struct sysinfo {
+    long  uptime;
+    unsigned long loads[3];
+    unsigned long totalram, freeram, sharedram, bufferram;
+    unsigned long totalswap, freeswap;
+    unsigned short procs;
+    unsigned long totalhigh, freehigh;
+    unsigned int mem_unit;
+    unsigned char _pad[20];
+};
+
+/* termios */
+struct termios {
+    unsigned int c_iflag, c_oflag, c_cflag, c_lflag;
+    unsigned char c_cc[19];
+    unsigned char _pad;
+    unsigned int c_ispeed, c_ospeed;
+};
+
+/* dirent + DIR */
+struct dirent {
+    unsigned long  d_ino;
+    long           d_off;
+    unsigned short d_reclen;
+    unsigned char  d_type;
+    char           d_name[256];
+};
+
+typedef struct {
+    int fd;
+    int buf_pos;
+    int buf_len;
+    unsigned char buf[2048];
+} DIR;
+
+/* inet */
+struct sockaddr_in {
+    unsigned short sin_family;
+    unsigned short sin_port;
+    unsigned int   sin_addr;
+    unsigned char  sin_zero[8];
+};
+
+#define AF_INET   2
+#define SOCK_STREAM 1
+#define SOCK_DGRAM  2
+#define IPPROTO_TCP 6
+#define IPPROTO_UDP 17
+
+/* F_* for fcntl */
+#define F_GETFD 1
+#define F_SETFD 2
+#define F_GETFL 3
+#define F_SETFL 4
+#define O_NONBLOCK 0x800
+#define FD_CLOEXEC 1
+
+/* mode bits */
+#define S_IFMT   0170000
+#define S_IFREG  0100000
+#define S_IFDIR  0040000
+#define S_IFCHR  0020000
+#define S_ISREG(m)  (((m) & S_IFMT) == S_IFREG)
+#define S_ISDIR(m)  (((m) & S_IFMT) == S_IFDIR)
+#define S_ISCHR(m)  (((m) & S_IFMT) == S_IFCHR)
+
+/* access() mode bits */
+#define F_OK 0
+#define R_OK 4
+#define W_OK 2
+#define X_OK 1
+
+/* Function declarations */
+int          nanosleep(const struct timespec *req, struct timespec *rem);
+unsigned int sleep(unsigned int seconds);
+int          usleep(unsigned int us);
+int          chdir(const char *path);
+char        *getcwd(char *buf, size_t size);
+int          access(const char *path, int mode);
+ssize_t      readlink(const char *path, char *buf, size_t bufsz);
+int          lstat(const char *path, struct stat *buf);
+int          stat(const char *path, struct stat *buf);
+int          fstat(int fd, struct stat *buf);
+int          ioctl(int fd, unsigned long req, void *arg);
+int          sysinfo(struct sysinfo *info);
+pid_t        getppid(void);
+int          sigaction(int signum, const struct sigaction *act, struct sigaction *oldact);
+int          sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+int          sigemptyset(sigset_t *set);
+int          sigfillset(sigset_t *set);
+int          sigaddset(sigset_t *set, int signum);
+int          sigdelset(sigset_t *set, int signum);
+int          sigismember(const sigset_t *set, int signum);
+int          getrlimit(int resource, struct rlimit *rlim);
+int          setrlimit(int resource, const struct rlimit *rlim);
+clock_t      times(struct tms *buf);
+pid_t        gettid(void);
+int          getrusage(int who, struct rusage *usage);
+int          fcntl(int fd, int cmd, long arg);
+int          uname(struct utsname *buf);
+int          isatty(int fd);
+int          link(const char *oldpath, const char *newpath);
+int          symlink(const char *target, const char *linkpath);
+int          unlinkat(int dirfd, const char *path, int flags);
+int          mkdir(const char *path, int mode);
+int          rmdir(const char *path);
+int          rename(const char *old, const char *newp);
+DIR         *opendir(const char *path);
+struct dirent *readdir(DIR *d);
+int          closedir(DIR *d);
+unsigned int  inet_addr(const char *cp);
+unsigned short htons(unsigned short v);
+unsigned short ntohs(unsigned short v);
+unsigned int   htonl(unsigned int v);
+unsigned int   ntohl(unsigned int v);

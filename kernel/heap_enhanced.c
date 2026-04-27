@@ -178,7 +178,7 @@ static void slab_free(void *ptr, u32 class_idx, u64 slab_phys) {
 
     /* Check red zone for overflow */
     if (!slab_check_redzone(ptr, class_idx)) {
-        print_str("[HEAP] Red zone violated! Buffer overflow detected.\r\n");
+        kprintf("[HEAP] Red zone violated! Buffer overflow detected.\r\n");
     }
 
     u32 idx = (u32)((u8*)ptr - ((u8*)slab_phys + SLAB_HDR_SZ)) / obj_size;
@@ -187,7 +187,7 @@ static void slab_free(void *ptr, u32 class_idx, u64 slab_phys) {
     u32 check = h->free_head;
     while (check != SLAB_NIL) {
         if (check == idx) {
-            print_str("[HEAP] Double free detected!\r\n");
+            kprintf("[HEAP] Double free detected!\r\n");
             return;
         }
         check = *(u32*)slot_ptr(slab_phys, obj_size, check);
@@ -388,20 +388,20 @@ static void block_free(void *ptr) {
 
     /* Double-free detection */
     if (b->magic == BLOCK_MAGIC_FREE) {
-        print_str("[HEAP] Double free detected in block allocator!\r\n");
+        kprintf("[HEAP] Double free detected in block allocator!\r\n");
         return;
     }
 
     /* Corruption check */
     if (b->magic != BLOCK_MAGIC_USED) {
-        print_str("[HEAP] Block corruption detected! Invalid magic.\r\n");
+        kprintf("[HEAP] Block corruption detected! Invalid magic.\r\n");
         return;
     }
 
     /* Check red zone */
     u16 *redzone = (u16*)((u8*)ptr + b->alloc_size);
     if (*redzone != REDZONE_MAGIC) {
-        print_str("[HEAP] Buffer overflow detected! Red zone corrupted.\r\n");
+        kprintf("[HEAP] Buffer overflow detected! Red zone corrupted.\r\n");
     }
 
     /* Mark as free */
@@ -523,23 +523,19 @@ void *heap_enhanced_realloc(void *old, usize new_sz) {
 
 /* ---- Print heap statistics ------------------------------------ */
 void heap_print_stats(void) {
-    print_str("\n=== Heap Statistics ===\r\n");
+    kprintf("\n=== Heap Statistics ===\r\n");
 
-    print_str("Slab Caches:\r\n");
+    kprintf("Slab Caches:\r\n");
     for (u32 c = 0; c < SLAB_NUM_CLASSES; c++) {
         if (slab_class_stats[c].slab_pages > 0) {
-            char buf[64];
-            ksnprintf(buf, sizeof(buf), "  Size %llu: %llu active, %llu pages\r\n",
+            kprintf("  Size %llu: %llu active, %llu pages\r\n",
                       (unsigned long long)slab_sizes[c],
                       (unsigned long long)slab_class_stats[c].active_objects,
                       (unsigned long long)slab_class_stats[c].slab_pages);
-            print_str(buf);
         }
     }
 
-    { char buf[128];
-      ksnprintf(buf, sizeof(buf),
-                "Block Heap:\r\n"
+    kprintf("Block Heap:\r\n"
                 "  Total: %llu bytes\r\n"
                 "  Used:  %llu bytes\r\n"
                 "  Free:  %llu bytes\r\n"
@@ -548,8 +544,7 @@ void heap_print_stats(void) {
                 (unsigned long long)block_total_used,
                 (unsigned long long)block_total_free,
                 (unsigned long long)block_peak_used);
-      print_str(buf); }
-    print_str("=======================\r\n");
+    kprintf("=======================\r\n");
 }
 
 /* ---- Defragment heap ------------------------------------------ */
@@ -570,7 +565,7 @@ int heap_check_integrity(void) {
     Block *b = (Block*)HEAP_BASE;
     while ((u64)b < HEAP_BASE + HEAP_SIZE) {
         if (!block_is_valid(b)) {
-            print_str("[HEAP] Block integrity error!\r\n");
+            kprintf("[HEAP] Block integrity error!\r\n");
             errors++;
             break;
         }

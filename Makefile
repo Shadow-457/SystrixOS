@@ -26,7 +26,7 @@ QEMU = qemu-system-x86_64
 # the raw code bytes of the handler instead of its address, causing
 # an immediate GPF cascade on the first timer tick.
 CFLAGS = -m64 -ffreestanding -fno-stack-protector -mno-red-zone -fno-pic \
-         -nostdlib -nostdinc -O2 -Iinclude \
+         -nostdlib -nostdinc -O2 -Iinclude -DSYSTRIX_KERNEL \
          -mno-mmx -mno-sse -mno-sse2 -mno-avx -Wall -Wextra -Wno-unused-parameter
 
 KERNEL_ASM_OBJS = \
@@ -34,6 +34,7 @@ KERNEL_ASM_OBJS = \
     kernel/isr.o
 
 KERNEL_C_OBJS = \
+    libc/systrix_libc.o \
     kernel/heap.o      \
     kernel/pmm.o       \
     kernel/vmm.o       \
@@ -79,6 +80,10 @@ KERNEL_C_OBJS = \
 
 KERNEL_OBJS = $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS)
 
+# -- Syslibc (shared kernel+user C library) -----------------------
+libc/systrix_libc.o: libc/systrix_libc.c libc/systrix_libc.h
+	$(CC) $(CFLAGS) -Ilibc -c -o $@ $<
+
 # -- Compilation rules ---------------------------------------------
 boot/boot.o: boot/boot.S
 	$(AS) --32 -o $@ $<
@@ -112,8 +117,8 @@ kernel.bin: $(KERNEL_OBJS) linker.ld
 fat32.img:
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 	mkfs.fat -F 32 -n SYSTRIXOS $@
-	echo "Systrix OS v0.1 (C kernel)" > /tmp/README.TXT
-	MTOOLS_SKIP_CHECK=1 mcopy -i $@ /tmp/README.TXT ::/README.TXT
+	echo "Systrix OS v0.1 (C kernel) created by hamza shahbaz (Shadow) just need your support guys and i will make a full ecosystem" > /tmp/README.TXT
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i $@ /tmp/README.TXT ::/README.TXT
 
 # -- Combined bootable disk image ----------------------------------
 systrix.img: boot.bin kernel.bin fat32.img
@@ -136,7 +141,7 @@ AUDIO = -device sb16,audiodev=snd0 -audiodev sdl,id=snd0
 
 run: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 128M -no-reboot \
+	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
@@ -144,7 +149,7 @@ run: systrix.img
 
 run-quiet: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 128M -no-reboot \
+	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
@@ -153,7 +158,7 @@ run-quiet: systrix.img
 
 run-sdl: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 128M -no-reboot \
+	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
@@ -162,7 +167,7 @@ run-sdl: systrix.img
 
 run-nographic: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 128M -no-reboot \
+	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
@@ -235,9 +240,9 @@ posix_test: POSIX_TEST
 	@echo "Built POSIX_TEST -- add to disk with: make addprog PROG=POSIX_TEST"
 
 programs: systrix.img HELLO_C MYPROGRAM POSIX_TEST
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img HELLO_C   ::/HELLO_C
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img MYPROGRAM ::/MYPROGRAM
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img POSIX_TEST ::/POSIX_TEST
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img HELLO_C   ::/HELLO_C
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img MYPROGRAM ::/MYPROGRAM
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img POSIX_TEST ::/POSIX_TEST
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo "Added HELLO_C, MYPROGRAM and POSIX_TEST to systrix.img"
 	@echo "  Boot QEMU then run:  elf POSIX_TEST"
@@ -245,7 +250,7 @@ programs: systrix.img HELLO_C MYPROGRAM POSIX_TEST
 # -- Add a program to the FAT32 partition --------------------------
 # Usage: make addprog PROG=./myapp
 addprog: fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img $(PROG) ::/$(notdir $(PROG))
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img $(PROG) ::/$(notdir $(PROG))
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo "Added $(notdir $(PROG)) to systrix.img -- run with: elf $(notdir $(PROG))"
 
@@ -273,7 +278,7 @@ compiler: systrix.img SHC
 
 # -- Clean ---------------------------------------------------------
 clean:
-	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp
+	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp libc/systrix_libc.o
 	rm -f boot.bin kernel.bin fat32.img systrix.img
 	rm -f user/crt0.o user/hello.o user/myprogram.o user/shc.o user/libc.o user/echo_server.o user/echo_client.o browser/browser.o
 	rm -f HELLO_C MYPROGRAM SHC ECHO_SRV ECHO_CLI BROWSER
@@ -298,8 +303,8 @@ ECHO_CLI: user/crt0.o user/libc.o user/echo_client.o
 	      -Ttext=0x400000 -o $@ $^
 
 ipc_demo: systrix.img ECHO_SRV ECHO_CLI
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img ECHO_SRV ::/ECHO_SRV
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img ECHO_CLI ::/ECHO_CLI
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img ECHO_SRV ::/ECHO_SRV
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img ECHO_CLI ::/ECHO_CLI
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo "Added ECHO_SRV and ECHO_CLI to disk"
 	@echo "  In Systrix shell:"
@@ -322,7 +327,11 @@ browser/browser.o: browser/browser.c browser/net.h browser/html.h \
                    user/libc.h user/tls.h include/font8x8.h
 	$(CC) $(BCFLAGS) -c -o $@ $<
 
-BROWSER: user/crt0.o user/libc.o browser/browser.o
+browser/png.o: browser/png.c browser/png.h
+	$(CC) $(BCFLAGS) -c -o $@ $<
+
+BROWSER_OBJ = user/crt0.o user/libc.o browser/browser.o browser/png.o
+BROWSER: $(BROWSER_OBJ)
 	$(LD) -m elf_x86_64 -static -nostdlib \
 	      -Ttext=0x400000 -o $@ $^
 	@echo "Built BROWSER ($(shell wc -c < BROWSER) bytes)"
@@ -331,7 +340,7 @@ browser: BROWSER
 	@echo "Browser binary ready. Run: make addbrowser"
 
 addbrowser: BROWSER fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img BROWSER ::/BROWSER
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img BROWSER ::/BROWSER
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo ""
 	@echo "  BROWSER added to systrix.img"
@@ -346,3 +355,28 @@ browser-all: systrix.img BROWSER
 	@echo "systrix.img ready with BROWSER. Run: make run"
 
 .PHONY: browser addbrowser browser-all
+
+# ── SystrixLynx — text-mode browser ──────────────────────────────
+browser/lynx.o: browser/lynx.c browser/net.h user/libc.h
+	$(CC) $(BCFLAGS) -c -o $@ $<
+
+LYNX_OBJ = user/crt0.o user/libc.o browser/lynx.o
+LYNX: $(LYNX_OBJ)
+	$(LD) -m elf_x86_64 -static -nostdlib \
+	      -Ttext=0x400000 -o $@ $^
+	@echo "Built LYNX ($$(wc -c < LYNX) bytes)"
+
+lynx: LYNX
+	@echo "SystrixLynx ready."
+
+addlynx: LYNX fat32.img
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img LYNX ::/LYNX
+	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
+	@echo "LYNX added to systrix.img  ->  boot and run:  elf LYNX"
+
+lynx-all: systrix.img LYNX
+	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img LYNX ::/LYNX
+	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
+	@echo "systrix.img ready with LYNX. Run: make run"
+
+.PHONY: lynx addlynx lynx-all

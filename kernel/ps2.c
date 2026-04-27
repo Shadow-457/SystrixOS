@@ -473,7 +473,7 @@ void ps2_init(void) {
     ps2_write_cmd(PS2_CMD_SELF_TEST);
     u8 st = ps2_read_data();
     if (st != 0x55) {
-        print_str("[PS2] controller self-test FAIL\r\n");
+        kprintf("[PS2] controller self-test FAIL\r\n");
         /* Carry on anyway — some emulators skip this */
     }
 
@@ -502,12 +502,12 @@ void ps2_init(void) {
         ps2_mouse_ready = 1;
     }
 
-    print_str("[PS2] KB=");
-    print_str(ps2_kb_present   ? "OK" : "NONE");
-    print_str(" MOUSE=");
-    print_str(ps2_mouse_present ? "OK" : "NONE");
-    if (ps2_scroll_wheel) print_str("+SCROLL");
-    print_str("\r\n");
+    kprintf("[PS2] KB=");
+    kprintf("%s", ps2_kb_present   ? "OK" : "NONE");
+    kprintf(" MOUSE=");
+    kprintf("%s", ps2_mouse_present ? "OK" : "NONE");
+    if (ps2_scroll_wheel) kprintf("+SCROLL");
+    kprintf("\r\n");
 }
 
 /* ── Poll loop (call from kernel main event loop) ────────────── */

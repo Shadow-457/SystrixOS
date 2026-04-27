@@ -102,23 +102,23 @@ int syscall_validate_args(u64 num, u64 arg1, u64 arg2, u64 arg3, u64 arg4, u64 a
 }
 
 void syscall_log_fault(u64 num, u64 arg1, u64 arg2, u64 arg3) {
-    print_str("\n[SYSCALL FAULT] pid=");
+    kprintf("\n[SYSCALL FAULT] pid=");
     PCB *pcb = process_current_pcb();
     if (pcb) {
         print_hex_byte((u8)(pcb->pid >> 8));
         print_hex_byte((u8)pcb->pid);
     }
-    print_str(" num=");
+    kprintf(" num=");
     print_hex_byte((u8)(num >> 8));
     print_hex_byte((u8)num);
-    print_str(" args=[");
+    kprintf(" args=[");
     print_hex_byte((u8)(arg1 >> 8));
     print_hex_byte((u8)arg1);
-    print_str(", ");
+    kprintf(", ");
     print_hex_byte((u8)(arg2 >> 8));
     print_hex_byte((u8)arg2);
-    print_str(", ");
+    kprintf(", ");
     print_hex_byte((u8)(arg3 >> 8));
     print_hex_byte((u8)arg3);
-    print_str("]\n");
+    kprintf("]\n");
 }

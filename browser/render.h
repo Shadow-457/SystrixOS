@@ -77,7 +77,8 @@ static inline void render_text(int x, int y, const char *text,
                                 unsigned int fg, unsigned int bg,
                                 int font_size, int bold, int avail_w) {
     int scale = (font_size <= 8) ? 1 : (font_size / 8);
-    if (scale < 1) scale = 1; if (scale > 4) scale = 4;
+    if (scale < 1) scale = 1;
+    if (scale > 4) scale = 4;
     int gw = 8 * scale + (bold ? 1 : 0);
     int lh = font_size * LINE_HEIGHT_MUL / 100;
     int cx = x, cy = y;
