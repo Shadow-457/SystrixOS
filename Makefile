@@ -118,8 +118,6 @@ kernel.bin: $(KERNEL_OBJS) linker.ld
 fat32.img:
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 	mkfs.fat -F 32 -n SYSTRIXOS $@
-	echo "Systrix OS v0.1 (C kernel) created by hamza shahbaz (Shadow) just need your support guys and i will make a full ecosystem" > /tmp/README.TXT
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i $@ /tmp/README.TXT ::/README.TXT
 
 # -- Combined bootable disk image ----------------------------------
 systrix.img: boot.bin kernel.bin fat32.img
@@ -128,7 +126,7 @@ systrix.img: boot.bin kernel.bin fat32.img
 	dd if=kernel.bin of=$@ bs=512 seek=1  conv=notrunc status=none
 	dd if=fat32.img  of=$@ bs=512 seek=512 conv=notrunc status=none
 
-all: systrix.img
+all: systrix.img synchome
 
 # -- QEMU ----------------------------------------------------------
 # Fixed MAC ensures net_init can read it from RAL0/RAH0 before reset.
@@ -140,7 +138,7 @@ DISP = -device bochs-display,xres=1024,yres=768
 USBHID = # PS/2 keyboard+mouse used — GUI polls port 0x60/0x64 directly
 AUDIO = -device sb16,audiodev=snd0 -audiodev sdl,id=snd0
 
-run: systrix.img
+run: synchome
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
 	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
@@ -148,7 +146,7 @@ run: systrix.img
 	        $(NIC) \
 	        $(AUDIO)
 
-run-quiet: systrix.img
+run-quiet: synchome
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
 	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
@@ -157,7 +155,7 @@ run-quiet: systrix.img
 	        $(AUDIO) \
 	        -display gtk
 
-run-sdl: systrix.img
+run-sdl: synchome
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
 	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
@@ -166,7 +164,7 @@ run-sdl: systrix.img
 	        $(AUDIO) \
 	        -display sdl
 
-run-nographic: systrix.img
+run-nographic: synchome
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
 	        -m 1G -no-reboot \
 	        -machine pc,accel=tcg \
@@ -259,29 +257,36 @@ addprog: fat32.img
 # Place any files you want inside SystrixOS into the host folder ./home/
 # then run:  make synchome
 # They will appear in the OS root ( / ) when you boot.
-# Sub-folders are copied recursively (mcopy -s).
 #
-# FAT32 filename rules (enforced by the filesystem):
-#   - Max 8 chars name + 3 chars extension, uppercase
-#   - e.g. MYFILE.TXT, MYPROG, SHOT.PNG
-#   - mtools will warn/mangle names that are too long or lowercase
-synchome: fat32.img
-	@if [ ! -d home ]; then \
-	    echo "home/ folder not found — creating it for you."; \
-	    mkdir -p home; \
-	    echo "Put files into home/ then run make synchome again."; \
-	    exit 0; \
+# Filenames are auto-uppercased (example.md → EXAMPLE.MD) so the
+# kernel's 8.3 FAT32 lookup always finds them.
+# The FAT32 root is wiped first so it always mirrors home/ exactly.
+synchome: systrix.img
+	@mkdir -p home
+	@if [ -z "$$(find home -maxdepth 1 -mindepth 1 2>/dev/null | head -1)" ]; then \
+	    echo "home/ is empty — add files then run make synchome again."; \
+	else \
+	    echo "Wiping existing files from FAT32 root..."; \
+	    for f in $$(MTOOLS_SKIP_CHECK=1 mdir -i fat32.img ::/ 2>/dev/null | awk '/^[A-Z][A-Z0-9 ]/{n=$$1; e=$$2; gsub(/ /,"",n); gsub(/ /,"",e); if(e!="") print n"."e; else print n}'); do \
+	        MTOOLS_SKIP_CHECK=1 mdel -i fat32.img "::/$$f" 2>/dev/null || true; \
+	    done; \
+	    echo "Syncing home/ → FAT32 filesystem root (names uppercased)..."; \
+	    find home -maxdepth 1 -mindepth 1 | while read item; do \
+	        base=$$(basename "$$item"); \
+	        upper=$$(echo "$$base" | tr '[:lower:]' '[:upper:]'); \
+	        if [ -d "$$item" ]; then \
+	            MTOOLS_SKIP_CHECK=1 MTOOLS_NO_VFAT=1 mcopy -s -o -i fat32.img "$$item" ::/$$upper && \
+	            echo "  dir   $$upper/"; \
+	        else \
+	            MTOOLS_SKIP_CHECK=1 MTOOLS_NO_VFAT=1 mcopy -o -i fat32.img "$$item" ::/$$upper && \
+	            echo "  file  $$upper"; \
+	        fi; \
+	    done; \
+	    dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none; \
+	    echo "Done. OS filesystem root:"; \
+	    MTOOLS_SKIP_CHECK=1 mdir -i fat32.img ::/ 2>/dev/null || true; \
+	    echo "Boot with: make run"; \
 	fi
-	@if [ -z "$$(ls -A home 2>/dev/null)" ]; then \
-	    echo "home/ is empty — nothing to sync."; \
-	    exit 0; \
-	fi
-	@echo "Syncing home/* → FAT32 filesystem root..."
-	MTOOLS_SKIP_CHECK=1 mcopy -s -o -i fat32.img home/* ::/
-	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo "Done. Contents of OS filesystem root:"
-	@MTOOLS_SKIP_CHECK=1 mdir -i fat32.img ::/ 2>/dev/null || true
-	@echo "Boot with: make run"
 
 # -- Sync home/ then immediately boot ------------------------------
 run-home: synchome
@@ -292,7 +297,7 @@ run-home: synchome
 	        $(NIC) \
 	        $(AUDIO)
 
-.PHONY: synchome run-home
+.PHONY: synchome run-home run run-quiet run-sdl run-nographic
 
 # -- Add sample .shadow source files to disk -----------------------
 addshadow: fat32.img
@@ -322,7 +327,7 @@ clean:
 	rm -f boot.bin kernel.bin fat32.img systrix.img
 	rm -f user/crt0.o user/hello.o user/myprogram.o user/shc.o user/libc.o user/echo_server.o user/echo_client.o browser/browser.o
 	rm -f HELLO_C MYPROGRAM SHC ECHO_SRV ECHO_CLI BROWSER
-	rm -f qemu.log /tmp/README.TXT
+	rm -f qemu.log
 	rm -f kernel/fbdev.o kernel/gui.o
 
 .PHONY: all run run-quiet hello myprog shc addshc addshadow compiler programs addprog clean

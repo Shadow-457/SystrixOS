@@ -269,6 +269,15 @@ static void backbuf_advance(void) {
  * the row), preventing the double-advance that caused draw_screen to
  * scroll all content off the top of the VGA buffer. */
 
+/* Mutable VGA text attribute — lets md_cat (and any other code) switch
+ * foreground/background colour without touching vga_putchar's logic.
+ * VGA colour byte: bits[7:4]=bg, bits[3:0]=fg  (0=black, F=bright white)
+ * Common fg values: 0F white, 0E yellow, 0B cyan, 0A green, 09 blue,
+ *                   0D magenta, 07 grey, 08 dark-grey                   */
+static u8 vga_cur_attr = VGA_ATTR;
+static inline void vga_set_attr(u8 a) { vga_cur_attr = a; }
+static inline void vga_reset_attr(void) { vga_cur_attr = VGA_ATTR; }
+
 void vga_putchar(u8 c) {
     if (c == '\r') {
         cur_col = 0;
@@ -300,12 +309,12 @@ void vga_putchar(u8 c) {
     col_just_wrapped = 0;
 
     /* Normal character — write to back-buffer current row */
-    back_buf[buf_next][cur_col] = (u16)(VGA_ATTR << 8) | c;
+    back_buf[buf_next][cur_col] = (u16)(vga_cur_attr << 8) | c;
 
     /* Write to VGA only if live */
     if (scroll_offset == 0)
         ((u16*)VGA_BASE)[cur_row * VGA_COLS + cur_col] =
-            (u16)(VGA_ATTR << 8) | c;
+            (u16)(vga_cur_attr << 8) | c;
 
     if (++cur_col < VGA_COLS) { vga_update_hw_cursor(); return; }
     /* Wrap column → implicit newline */
@@ -323,7 +332,7 @@ void vga_putchar(u8 c) {
 void vga_backspace(void) {
     if (cur_col == 0) return;
     cur_col--;
-    u16 blank = (u16)(VGA_ATTR << 8) | ' ';
+    u16 blank = (u16)(VGA_ATTR << 8) | ' ';   /* backspace erases with default attr */
     back_buf[buf_next][cur_col] = blank;
     if (scroll_offset == 0)
         ((u16*)VGA_BASE)[cur_row * VGA_COLS + cur_col] = blank;
@@ -2086,7 +2095,182 @@ static void cmd_cp(const char *arg) {
 }
 
 /* ---- cat / hexdump / touch / rm / rename / write (unchanged) --- */
+
+/* ---- Markdown renderer -----------------------------------------
+ * Renders .md files with VGA colours instead of raw syntax.
+ *
+ * VGA fg colour palette (bg=0 black):
+ *   0x0F white   0x0E yellow  0x0B cyan    0x0A green
+ *   0x09 blue    0x0D magenta 0x07 grey    0x08 dark-grey
+ *
+ * Supported syntax:
+ *   # / ## / ###   headers      (yellow / cyan / green)
+ *   **text**        bold         (bright white on black = 0x0F, already default)
+ *   *text*          italic       (magenta)
+ *   `text`          inline code  (cyan)
+ *   - / * item     bullet       (green dash + white text)
+ *   > text         blockquote   (grey)
+ *   ---            horizontal rule
+ *   blank line     paragraph break
+ ----------------------------------------------------------------- */
+
+/* Emit 'len' chars from 'p' using colour 'attr', then restore default. */
+static void md_puts_col(const char *p, int len, u8 attr) {
+    vga_set_attr(attr);
+    for (int i = 0; i < len; i++) vga_putchar((u8)p[i]);
+    vga_reset_attr();
+}
+
+/* Render one line of markdown inline spans (**bold**, *italic*, `code`).
+ * Called after the line-level prefix (header marker etc.) has been handled. */
+static void md_render_inline(const char *p, int len) {
+    int i = 0;
+    while (i < len) {
+        /* backtick inline code */
+        if (p[i] == '`') {
+            int j = i + 1;
+            while (j < len && p[j] != '`') j++;
+            vga_set_attr(0x0B); /* cyan */
+            for (int k = i + 1; k < j; k++) vga_putchar((u8)p[k]);
+            vga_reset_attr();
+            i = (j < len) ? j + 1 : j;
+            continue;
+        }
+        /* **bold** */
+        if (p[i] == '*' && i + 1 < len && p[i+1] == '*') {
+            int j = i + 2;
+            while (j + 1 < len && !(p[j] == '*' && p[j+1] == '*')) j++;
+            vga_set_attr(0x0F); /* bright white — already default but explicit */
+            for (int k = i + 2; k < j; k++) vga_putchar((u8)p[k]);
+            vga_reset_attr();
+            i = (j + 1 < len) ? j + 2 : len;
+            continue;
+        }
+        /* *italic* */
+        if (p[i] == '*') {
+            int j = i + 1;
+            while (j < len && p[j] != '*') j++;
+            vga_set_attr(0x0D); /* magenta */
+            for (int k = i + 1; k < j; k++) vga_putchar((u8)p[k]);
+            vga_reset_attr();
+            i = (j < len) ? j + 1 : j;
+            continue;
+        }
+        /* plain character */
+        vga_putchar((u8)p[i]);
+        i++;
+    }
+}
+
+static void cmd_mdcat(const char *name) {
+    i64 fd = sh_open(name);
+    if (fd < 0) { kprintf("File not found.\r\n"); return; }
+
+    /* Read whole file into a heap buffer so we can walk lines. */
+    /* We reuse cat_buf for 512-byte chunks and accumulate into a line buf. */
+    static char line[256];
+    int llen = 0;
+
+    for (;;) {
+        i64 n = sh_read(fd, cat_buf, 512);
+        if (n <= 0) break;
+        for (i64 ci = 0; ci < n; ci++) {
+            char c = (char)cat_buf[ci];
+            if (c == '\r') continue;
+            if (c == '\n') {
+                /* process accumulated line */
+                line[llen] = '\0';
+                const char *l = line;
+                int ll = llen;
+                llen = 0;
+
+                /* --- line-level elements --- */
+
+                /* horizontal rule: --- or *** or ___ (at least 3) */
+                if (ll >= 3 && (l[0]=='-'||l[0]=='*'||l[0]=='_')) {
+                    int all = 1;
+                    for (int i = 0; i < ll; i++)
+                        if (l[i] != l[0] && l[i] != ' ') { all = 0; break; }
+                    if (all) {
+                        vga_set_attr(0x08); /* dark grey */
+                        for (int i = 0; i < 80; i++) vga_putchar('-');
+                        vga_reset_attr();
+                        kprintf("\r\n");
+                        continue;
+                    }
+                }
+
+                /* headers ### ## # */
+                if (l[0] == '#') {
+                    int hlvl = 0;
+                    while (hlvl < ll && l[hlvl] == '#') hlvl++;
+                    u8 hcol = (hlvl == 1) ? 0x0E :   /* yellow  H1 */
+                              (hlvl == 2) ? 0x0B :   /* cyan    H2 */
+                                            0x0A;    /* green   H3+ */
+                    const char *htxt = l + hlvl;
+                    int htlen = ll - hlvl;
+                    while (htlen > 0 && htxt[0] == ' ') { htxt++; htlen--; }
+                    vga_set_attr(hcol);
+                    md_render_inline(htxt, htlen);
+                    vga_reset_attr();
+                    kprintf("\r\n");
+                    continue;
+                }
+
+                /* blockquote > */
+                if (l[0] == '>' ) {
+                    vga_set_attr(0x07); /* grey */
+                    vga_putchar('>');
+                    vga_putchar(' ');
+                    int off = (ll > 1 && l[1] == ' ') ? 2 : 1;
+                    md_render_inline(l + off, ll - off);
+                    vga_reset_attr();
+                    kprintf("\r\n");
+                    continue;
+                }
+
+                /* bullet: "- " or "* " (but not "---") */
+                if (ll >= 2 && (l[0] == '-' || l[0] == '*') && l[1] == ' ') {
+                    vga_set_attr(0x0A); /* green bullet */
+                    kprintf("  - ");
+                    vga_reset_attr();
+                    md_render_inline(l + 2, ll - 2);
+                    kprintf("\r\n");
+                    continue;
+                }
+
+                /* blank line */
+                if (ll == 0) { kprintf("\r\n"); continue; }
+
+                /* normal paragraph line — render inline spans */
+                md_render_inline(l, ll);
+                kprintf("\r\n");
+            } else {
+                if (llen < 255) line[llen++] = c;
+            }
+        }
+    }
+    /* flush any remaining line without trailing newline */
+    if (llen > 0) {
+        line[llen] = '\0';
+        md_render_inline(line, llen);
+        kprintf("\r\n");
+    }
+    vga_reset_attr();
+    sh_close(fd);
+}
+
 static void cmd_cat(const char *name) {
+    /* Auto-detect .md / .MD extension and use the markdown renderer */
+    const char *dot = (const char*)0;
+    for (const char *p = name; *p; p++) if (*p == '.') dot = p;
+    if (dot && (
+            (dot[1]=='m'||dot[1]=='M') &&
+            (dot[2]=='d'||dot[2]=='D') &&
+            dot[3]=='\0')) {
+        cmd_mdcat(name);
+        return;
+    }
     i64 fd = sh_open(name);
     if (fd < 0) { kprintf("File not found.\r\n"); return; }
     for (;;) {
@@ -2123,14 +2307,16 @@ static void cmd_touch(const char *name) {
 }
 
 /* mktxt FILE1 FILE2 FILE3 ...
- * Creates any number of empty .txt files in one command.
+ * Creates any number of empty text or markdown files in one command.
  * Names are space-separated; each is auto-suffixed with .TXT if
- * no extension is given, and uppercased to satisfy FAT32 8.3 rules. */
+ * no extension is given.  Use .md suffix for markdown files.
+ * All names are uppercased to satisfy FAT32 8.3 rules. */
 static void cmd_mktxt(const char *arg) {
     if (!arg || !arg[0]) {
         kprintf("Usage: mktxt <name1> [name2] [name3] ...\r\n");
-        kprintf("  Creates one or more empty text files.\r\n");
-        kprintf("  Extensions are optional — .TXT is added automatically.\r\n");
+        kprintf("  Creates one or more empty text/markdown files.\r\n");
+        kprintf("  No extension = .TXT added automatically.\r\n");
+        kprintf("  Use .md suffix for markdown:  mktxt README.md NOTES.md\r\n");
         return;
     }
 
