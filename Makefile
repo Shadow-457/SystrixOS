@@ -174,23 +174,6 @@ run-nographic: synchome
 	        -serial mon:stdio \
 	        -nographic
 
-# -- Engine Compiler (engc) — runs INSIDE EngineOS -------------------
-user/shc.o: user/shc.c
-	$(CC) -m64 -O2 -ffreestanding -fno-stack-protector -mno-red-zone \
-	      -nostdlib -nostdinc -c -o $@ $<
-
-SHC: user/crt0.o user/libc.o user/shc.o
-	$(LD) -m elf_x86_64 -static -nostdlib \
-	      -Ttext=0x400000 -o $@ $^
-
-shc: SHC
-	@echo "Built SHC -- add to disk with: make addshc"
-
-addshc: SHC fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img SHC ::/SHC
-	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo "SHC added to disk. Boot EngineOS and run: elf SHC"
-
 # -- libc (basic C library for user programs) ----------------------
 # Link user programs with: crt0.o libc.o yourprog.o
 # Then #include "libc.h" in your source.
@@ -299,38 +282,16 @@ run-home: synchome
 
 .PHONY: synchome run-home run run-quiet run-sdl run-nographic
 
-# -- Add sample .shadow source files to disk -----------------------
-addshadow: fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img user/fib.shadow ::/FIB.SHA
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img user/hello.shadow ::/HELLO.SHA
-	dd if=fat32.img of=shadow.img bs=512 seek=512 conv=notrunc status=none
-	@echo "Added FIB.SHA and HELLO.SHA to disk"
-
-# -- Build compiler + add everything to disk in one shot -----------
-# This is the main workflow: build SHC, add it + sample files to disk
-compiler: systrix.img SHC
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img SHC ::/SHC
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img user/fib.shadow ::/FIB.SHA
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img user/hello.shadow ::/HELLO.SHA
-	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo ""
-	@echo "  SHC compiler + sample .shadow files added to disk."
-	@echo "  Boot EngineOS, then:"
-	@echo "    elf SHC          <- launches the compiler"
-	@echo "    (enter) FIB.SHA  <- compiles fibonacci"
-	@echo "    elf FIB          <- runs it"
-	@echo ""
-
 # -- Clean ---------------------------------------------------------
 clean:
 	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp libc/systrix_libc.o
 	rm -f boot.bin kernel.bin fat32.img systrix.img
-	rm -f user/crt0.o user/hello.o user/myprogram.o user/shc.o user/libc.o user/echo_server.o user/echo_client.o browser/browser.o
-	rm -f HELLO_C MYPROGRAM SHC ECHO_SRV ECHO_CLI BROWSER
+	rm -f user/crt0.o user/hello.o user/myprogram.o user/libc.o user/echo_server.o user/echo_client.o browser/lynx.o
+	rm -f HELLO_C MYPROGRAM ECHO_SRV ECHO_CLI LYNX
 	rm -f qemu.log
 	rm -f kernel/fbdev.o kernel/gui.o
 
-.PHONY: all run run-quiet hello myprog shc addshc addshadow compiler programs addprog clean
+.PHONY: all run run-quiet hello myprog programs addprog clean
 
 # -- IPC echo server/client (microkernel demo) ---------------------
 user/echo_server.o: user/echo_server.c user/ipc.h
@@ -359,49 +320,13 @@ ipc_demo: systrix.img ECHO_SRV ECHO_CLI
 
 .PHONY: ipc_demo
 
-# ── Browser ────────────────────────────────────────────────────────
-# Build flags for browser (needs -Ibrowser -Iuser -Iinclude, no SSE)
+# ── SystrixLynx — text-mode browser ──────────────────────────────
 BCFLAGS = -m64 -O2 -ffreestanding -fno-stack-protector -mno-red-zone \
           -fno-pic -nostdlib -nostdinc \
           -Ibrowser -Iuser -Iinclude \
           -mno-mmx -mno-sse -mno-sse2 -mno-avx \
           -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
 
-browser/browser.o: browser/browser.c browser/net.h browser/html.h \
-                   browser/css.h browser/layout.h browser/render.h \
-                   user/libc.h user/tls.h include/font8x8.h
-	$(CC) $(BCFLAGS) -c -o $@ $<
-
-browser/png.o: browser/png.c browser/png.h
-	$(CC) $(BCFLAGS) -c -o $@ $<
-
-BROWSER_OBJ = user/crt0.o user/libc.o browser/browser.o browser/png.o
-BROWSER: $(BROWSER_OBJ)
-	$(LD) -m elf_x86_64 -static -nostdlib \
-	      -Ttext=0x400000 -o $@ $^
-	@echo "Built BROWSER ($(shell wc -c < BROWSER) bytes)"
-
-browser: BROWSER
-	@echo "Browser binary ready. Run: make addbrowser"
-
-addbrowser: BROWSER fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img BROWSER ::/BROWSER
-	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo ""
-	@echo "  BROWSER added to systrix.img"
-	@echo "  Boot Systrix OS, then at the shell:"
-	@echo "    elf BROWSER"
-	@echo ""
-
-# One-shot: build kernel + browser + write to disk
-browser-all: systrix.img BROWSER
-	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img BROWSER ::/BROWSER
-	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo "systrix.img ready with BROWSER. Run: make run"
-
-.PHONY: browser addbrowser browser-all
-
-# ── SystrixLynx — text-mode browser ──────────────────────────────
 browser/lynx.o: browser/lynx.c browser/net.h user/libc.h
 	$(CC) $(BCFLAGS) -c -o $@ $<
 
