@@ -1,13 +1,13 @@
 # Systrix OS — Deep Reference Manual
 
 > x86-64 microkernel written in C and AT&T assembly.  
-> Boots from a raw MBR disk image, runs ELF64 user-space binaries, has a GUI, networking, audio, a browser, and its own scripting language.
+> Boots from a raw MBR disk image, runs ELF64 user-space binaries, has a GUI, networking, audio, two browsers, and its own scripting language.
 
 ---
 
 ## Table of Contents
 
-1. [What Is Systrix OS?](#1-what-is-engine-os)
+1. [What Is Systrix OS?](#1-what-is-systrix-os)
 2. [Repository Layout](#2-repository-layout)
 3. [Building from Source](#3-building-from-source)
 4. [Disk Image Layout](#4-disk-image-layout)
@@ -34,29 +34,34 @@
    - 7.18 [NVMe Driver](#718-nvme-driver)
    - 7.19 [Audio (OPL2 FM + SB16 PCM Mixer)](#719-audio-opl2-fm--sb16-pcm-mixer)
    - 7.20 [Framebuffer / Display (fbdev)](#720-framebuffer--display-fbdev)
-   - 7.21 [GUI Desktop](#721-gui-desktop)
-   - 7.22 [PS/2 Keyboard & Mouse](#722-ps2-keyboard--mouse)
-   - 7.23 [Input Subsystem](#723-input-subsystem)
-   - 7.24 [ACPI](#724-acpi)
-   - 7.25 [TSS & Privilege Switching](#725-tss--privilege-switching)
-   - 7.26 [Security (KASLR, SMAP/SMEP, Stack Canaries)](#726-security-kaslr-smapsmep-stack-canaries)
-   - 7.27 [Resilience (SMP, OOM, Watchdog, Panic)](#727-resilience-smp-oom-watchdog-panic)
-   - 7.28 [Swap](#728-swap)
-   - 7.29 [Package Manager](#729-package-manager)
+   - 7.21 [Graphics Subsystem (gfx)](#721-graphics-subsystem-gfx)
+   - 7.22 [GUI Desktop](#722-gui-desktop)
+   - 7.23 [PS/2 Keyboard & Mouse](#723-ps2-keyboard--mouse)
+   - 7.24 [Input Subsystem](#724-input-subsystem)
+   - 7.25 [ACPI](#725-acpi)
+   - 7.26 [TSS & Privilege Switching](#726-tss--privilege-switching)
+   - 7.27 [Security (KASLR, SMAP/SMEP, Stack Canaries)](#727-security-kaslr-smapsmep-stack-canaries)
+   - 7.28 [Resilience (SMP, OOM, Watchdog, Panic)](#728-resilience-smp-oom-watchdog-panic)
+   - 7.29 [Swap](#729-swap)
+   - 7.30 [Package Manager](#730-package-manager)
+   - 7.31 [PNG Viewer](#731-png-viewer)
 8. [Shell Reference](#8-shell-reference)
 9. [User-Space ABI](#9-user-space-abi)
    - 9.1 [ELF64 Loader](#91-elf64-loader)
    - 9.2 [crt0 & Program Startup](#92-crt0--program-startup)
-   - 9.3 [libc.h / libc.c](#93-libch--libcc)
-   - 9.4 [libm.h — Math Library](#94-libmh--math-library)
-   - 9.5 [pthread.h — Threading](#95-pthreadh--threading)
-   - 9.6 [tls.h — TLS 1.2 Client](#96-tlsh--tls-12-client)
-   - 9.7 [ipc.h — IPC Messaging](#97-ipch--ipc-messaging)
-   - 9.8 [gfx.h — Graphics API](#98-gfxh--graphics-api)
-   - 9.9 [sound.h — Audio API](#99-soundh--audio-api)
+   - 9.3 [systrix_libc — Shared Kernel/User C Library](#93-systrix_libc--shared-kerneluser-c-library)
+   - 9.4 [libc.h / libc.c — User-Space C Library](#94-libch--libcc--user-space-c-library)
+   - 9.5 [libm.h — Math Library](#95-libmh--math-library)
+   - 9.6 [pthread.h — Threading](#96-pthreadh--threading)
+   - 9.7 [tls.h — TLS 1.2 Client](#97-tlsh--tls-12-client)
+   - 9.8 [ipc.h — IPC Messaging](#98-ipch--ipc-messaging)
+   - 9.9 [gfx.h — Graphics API](#99-gfxh--graphics-api)
+   - 9.10 [sound.h — Audio API](#910-soundh--audio-api)
 10. [Writing a User Program](#10-writing-a-user-program)
 11. [SHC — The Shadow Scripting Compiler](#11-shc--the-shadow-scripting-compiler)
 12. [Browser](#12-browser)
+    - 12.1 [Graphical Browser (BROWSER)](#121-graphical-browser-browser)
+    - 12.2 [SystrixLynx — Text-Mode Browser (LYNX)](#122-systrixlynx--text-mode-browser-lynx)
 13. [Syscall Table](#13-syscall-table)
 14. [FAQ](#14-faq)
 15. [Known Bugs & Limitations](#15-known-bugs--limitations)
@@ -84,11 +89,16 @@ Systrix OS is a from-scratch, x86-64 microkernel written entirely in C (kernel) 
 - NVMe PCIe SSD driver (submission/completion queues)
 - SB16 PCM audio mixer + OPL2 FM synthesis
 - 1024×768 / 1080p framebuffer GUI desktop (bochs-display)
-- Built-in web browser (TCP, TLS 1.2, HTML/CSS renderer)
+- Double-buffered sprite/tilemap graphics subsystem (`gfx.c`)
+- Built-in graphical web browser (TCP, TLS 1.2, HTML/CSS renderer)
+- Built-in text-mode web browser (SystrixLynx — Lynx-style, HTTP)
 - IPC message-passing microkernel layer
 - Signals (POSIX-compatible), pipes, futex, pthreads
 - KASLR, SMAP, SMEP, stack canaries, red-zone guards
 - Kernel watchdog, OOM killer, basic SMP bringup
+- Shared kernel+user C library (`libc/systrix_libc.c`)
+- PNG viewer (`photo` shell command)
+- Advanced shell with pipelines, I/O redirection, background jobs, and variables
 
 **What it does NOT have (yet):**
 
@@ -103,83 +113,100 @@ Systrix OS is a from-scratch, x86-64 microkernel written entirely in C (kernel) 
 ## 2. Repository Layout
 
 ```
-Systrix-0.1/
+SystrixOS-main/
 ├── boot/
-│   └── boot.S          # 512-byte MBR bootloader (16-bit real mode)
+│   └── boot.S              # 512-byte MBR bootloader (16-bit real mode)
 ├── kernel/
-│   ├── entry.S         # Long-mode entry, GDT, paging, BSS clear, jumps to kernel_main()
-│   ├── isr.S           # IDT stubs for 256 vectors + syscall dispatch table
-│   ├── kernel.c        # VGA, ATA PIO, FAT32, VFS, shell, kernel_main()
-│   ├── heap.c          # Simple bump-style kernel heap
-│   ├── heap_enhanced.c # dlmalloc-style allocator with coalescing
-│   ├── pmm.c           # Physical memory manager (buddy allocator, E820)
-│   ├── pmm_enhanced.c  # PMM zones, watermarks, poison pages, stats
-│   ├── vmm.c           # Page table management, VMA tracking, CoW fork
-│   ├── vmm_enhanced.c  # ASLR, huge pages, mprotect, guard pages
-│   ├── vmalloc.c       # Kernel virtual address space allocator (vmalloc/vfree)
-│   ├── mem_safety.c    # Red-zone guards, quarantine, leak tracking
-│   ├── tss.c           # Task State Segment for ring-3 → ring-0 stack switch
-│   ├── process.c       # PCB table, process create/destroy
-│   ├── elf.c           # ELF64 loader for user binaries
-│   ├── scheduler.c     # Preemptive round-robin scheduler
-│   ├── syscall.c       # All syscall implementations
-│   ├── ipc.c           # Message-passing IPC (64-byte messages)
-│   ├── signal.c        # POSIX signals (kill, sigaction, sigprocmask)
-│   ├── pipe.c          # Anonymous kernel pipes
-│   ├── futex.c         # Linux-compatible futex (FUTEX_WAIT / FUTEX_WAKE)
-│   ├── fork_exec.c     # fork(), execve(), clone(), wait4()
-│   ├── input.c         # Unified input ring (keyboard, mouse, gamepad)
-│   ├── ps2.c           # PS/2 i8042 controller (keyboard + mouse)
-│   ├── usb.c           # EHCI + XHCI USB host controller driver
-│   ├── usb_hid.c       # USB HID (keyboard/mouse) class driver
-│   ├── pci.c           # PCI/PCIe enumeration + BAR sizing
-│   ├── ahci.c          # AHCI SATA controller driver (DMA)
-│   ├── nvme.c          # NVMe PCIe SSD driver
-│   ├── e1000.c         # Intel E1000 NIC driver
-│   ├── net.c           # TCP/IP stack (ARP, IP, ICMP, TCP, UDP, DHCP, DNS)
-│   ├── fbdev.c         # Framebuffer device (bochs-display)
-│   ├── gui.c           # Desktop GUI, window manager, widgets
-│   ├── sound.c         # OPL2 FM synth + SB16 PCM mixer
-│   ├── acpi.c          # ACPI table parser, I/O APIC, reboot/shutdown
-│   ├── uefi.c          # UEFI stub (not used in current BIOS boot path)
-│   ├── vfs.c           # VFS inode layer (mount, open, read, write, stat)
-│   ├── jfs.c           # Journaling filesystem (second partition)
-│   ├── swap.c          # Swap-to-disk (demand eviction)
-│   ├── security.c      # KASLR, SMAP/SMEP, copy_from/to_user, canaries
-│   ├── shell.c         # Extended shell (sourced into kernel_main loop)
-│   ├── resilience.c    # SMP init, watchdog, OOM killer, kernel_panic
-│   └── pkgmgr.c        # In-memory package registry
+│   ├── entry.S             # Long-mode entry, GDT, paging, BSS clear, jumps to kernel_main()
+│   ├── isr.S               # IDT stubs for 256 vectors + syscall dispatch table
+│   ├── kernel.c            # VGA, ATA PIO, FAT32, VFS, shell dispatch, kernel_main()
+│   ├── shell.c             # Shell: parser, pipelines, redirection, variables, builtins
+│   ├── heap.c              # Simple bump-style kernel heap
+│   ├── heap_enhanced.c     # dlmalloc-style allocator with coalescing
+│   ├── pmm.c               # Physical memory manager (buddy allocator, E820)
+│   ├── pmm_enhanced.c      # PMM zones, watermarks, poison pages, stats
+│   ├── vmm.c               # Page table management, VMA tracking, CoW fork
+│   ├── vmm_enhanced.c      # ASLR, huge pages, mprotect, guard pages
+│   ├── vmalloc.c           # Kernel virtual address space allocator (vmalloc/vfree)
+│   ├── mem_safety.c        # Red-zone guards, quarantine, leak tracking
+│   ├── tss.c               # Task State Segment for ring-3 → ring-0 stack switch
+│   ├── process.c           # PCB table, process create/destroy
+│   ├── elf.c               # ELF64 loader for user binaries
+│   ├── scheduler.c         # Preemptive round-robin scheduler
+│   ├── syscall.c           # All syscall implementations
+│   ├── ipc.c               # Message-passing IPC (64-byte messages)
+│   ├── signal.c            # POSIX signals (kill, sigaction, sigprocmask)
+│   ├── pipe.c              # Anonymous kernel pipes
+│   ├── futex.c             # Linux-compatible futex (FUTEX_WAIT / FUTEX_WAKE)
+│   ├── fork_exec.c         # fork(), execve(), clone(), wait4()
+│   ├── input.c             # Unified input ring (keyboard, mouse, gamepad)
+│   ├── ps2.c               # PS/2 i8042 controller (keyboard + mouse)
+│   ├── usb.c               # EHCI + XHCI USB host controller driver
+│   ├── usb_hid.c           # USB HID (keyboard/mouse) class driver
+│   ├── pci.c               # PCI/PCIe enumeration + BAR sizing
+│   ├── ahci.c              # AHCI SATA controller driver (DMA)
+│   ├── nvme.c              # NVMe PCIe SSD driver
+│   ├── e1000.c             # Intel E1000 NIC driver
+│   ├── net.c               # TCP/IP stack (ARP, IP, ICMP, TCP, UDP, DHCP, DNS)
+│   ├── tcpip.c             # Extended TCP/IP helpers
+│   ├── fbdev.c             # Framebuffer device (bochs-display)
+│   ├── gfx.c               # Double-buffered sprite blitter + tilemap renderer
+│   ├── gui.c               # Desktop GUI, window manager, widgets
+│   ├── sound.c             # OPL2 FM synth + SB16 PCM mixer
+│   ├── acpi.c              # ACPI table parser, I/O APIC, reboot/shutdown
+│   ├── uefi.c              # UEFI stub (not used in current BIOS boot path)
+│   ├── vfs.c               # VFS inode layer (mount, open, read, write, stat)
+│   ├── jfs.c               # Journaling filesystem (second partition)
+│   ├── swap.c              # Swap-to-disk (demand eviction)
+│   ├── security.c          # KASLR, SMAP/SMEP, copy_from/to_user, canaries
+│   ├── resilience.c        # SMP init, watchdog, OOM killer, kernel_panic
+│   ├── pkgmgr.c            # In-memory package registry
+│   └── pngview.c           # Kernel PNG decoder + photo viewer (photo command)
+├── libc/
+│   ├── systrix_libc.c      # Shared kernel+user C library implementation
+│   └── systrix_libc.h      # Shared library header (types, string, memory, etc.)
 ├── include/
-│   └── kernel.h        # Single mega-header: all types, structs, prototypes
+│   ├── font8x8.h           # 8×8 bitmap font (used by fbdev + browser renderer)
+│   └── kernel.h            # Single mega-header: all types, structs, prototypes
 ├── user/
-│   ├── crt0.S          # ELF entry point _start, calls main(), then sys_exit
-│   ├── libc.h          # Full C library header (types, syscall wrappers, stdio, …)
-│   ├── libc.c          # Implementations: printf, malloc, string funcs, sockets, …
-│   ├── malloc.c        # dlmalloc port for user space
-│   ├── libm.h          # Header-only math library (sin, cos, sqrt, pow, …)
-│   ├── pthread.h       # Header-only pthreads on top of clone + futex
-│   ├── tls.h           # Header-only TLS 1.2 client (AES-GCM, SHA-256, RSA)
-│   ├── ipc.h           # IPC message structs + send/recv wrappers
-│   ├── gfx.h           # Graphics syscall wrappers (blit, flip, tilemap)
-│   ├── sound.h         # Audio syscall wrappers (OPL2 + PCM mixer)
-│   ├── hello.c         # Minimal "Hello, world!" example
-│   ├── myprogram.c     # Demo program
-│   ├── posix_test.c    # POSIX compliance test suite
-│   ├── echo_server.c   # IPC echo server demo
-│   ├── echo_client.c   # IPC echo client demo
-│   ├── shc.c           # SHC (Shadow) scripting language compiler (~43 KB)
-│   ├── fib.shadow      # Fibonacci example in the Shadow language
-│   └── hello.shadow    # Hello-world in Shadow
+│   ├── crt0.S              # ELF entry point _start, calls main(), then sys_exit
+│   ├── libc.h              # Full C library header (types, syscall wrappers, stdio, …)
+│   ├── libc.c              # Implementations: printf, malloc, string funcs, sockets, …
+│   ├── malloc.c            # dlmalloc port for user space
+│   ├── libm.h              # Header-only math library (sin, cos, sqrt, pow, …)
+│   ├── pthread.h           # Header-only pthreads on top of clone + futex
+│   ├── tls.h               # Header-only TLS 1.2 client (AES-GCM, SHA-256, RSA)
+│   ├── ipc.h               # IPC message structs + send/recv wrappers
+│   ├── gfx.h               # Graphics syscall wrappers (blit, flip, tilemap)
+│   ├── sound.h             # Audio syscall wrappers (OPL2 + PCM mixer)
+│   ├── hello.c             # Minimal "Hello, world!" example
+│   ├── myprogram.c         # Demo program
+│   ├── posix_test.c        # POSIX compliance test suite
+│   ├── echo_server.c       # IPC echo server demo
+│   ├── echo_client.c       # IPC echo client demo
+│   ├── shc.c               # SHC (Shadow) scripting language compiler (~43 KB)
+│   ├── fib.shadow          # Fibonacci example in the Shadow language
+│   └── hello.shadow        # Hello-world in Shadow
 ├── browser/
-│   ├── browser.c       # Main browser: HTTP/HTTPS fetch, HTML parse, render loop
-│   ├── html.h          # HTML tokenizer + DOM builder
-│   ├── css.h           # CSS property parser
-│   ├── layout.h        # Block/inline box layout engine
-│   ├── render.h        # Framebuffer renderer (text + boxes)
-│   └── net.h           # Browser-side socket helpers
-├── linker.ld           # Kernel linker script (loads at 0x8000, binary output)
-├── Makefile            # Build system
-└── work.md             # Dev log of completed features
+│   ├── browser.c           # Main graphical browser: HTTP/HTTPS fetch, HTML parse, render
+│   ├── html.h              # HTML tokenizer + DOM builder
+│   ├── css.h               # CSS property parser
+│   ├── layout.h            # Block/inline box layout engine
+│   ├── render.h            # Framebuffer renderer (text + boxes)
+│   ├── net.h               # Browser-side socket helpers
+│   ├── lynx.c              # SystrixLynx: text-mode HTTP browser (Lynx-style)
+│   ├── myprog.c            # Browser demo program
+│   ├── png.c               # PNG encoder/decoder for browser
+│   └── png.h               # PNG helper header
+├── home/
+│   ├── README.MD           # In-OS quick-reference card
+│   ├── README.TXT          # Brief note about the home/ sync workflow
+│   └── PHOTO_INSTRUCTIONS.txt  # Guide for syncing photos to view with `photo`
+├── linker.ld               # Kernel linker script (loads at 0x8000, binary output)
+├── Makefile                # Build system
+├── slibc_reference.md      # Full syntax reference for systrix_libc
+├── LYNX                    # Pre-built SystrixLynx text browser binary
+└── POSIX_TEST              # Pre-built POSIX compliance test binary
 ```
 
 ---
@@ -204,15 +231,23 @@ sudo dnf install gcc binutils mtools qemu-system-x86
 | Command | What it does |
 |---|---|
 | `make` | Build `systrix.img` (bootable disk image) |
-| `make run` | Build + launch in QEMU (SDL display) |
+| `make run` | Build + sync `home/` + launch in QEMU (SDL display) |
 | `make run-quiet` | Run with GTK display |
 | `make run-sdl` | Run with SDL display explicitly |
 | `make run-nographic` | Run with serial console only |
-| `make browser` | Build the BROWSER user binary |
+| `make run-home` | Sync `home/` then immediately boot |
+| `make synchome` | Uppercase-sync `home/` folder contents → FAT32 root |
+| `make browser` | Build the graphical BROWSER binary |
 | `make addbrowser` | Inject BROWSER into the FAT32 partition |
-| `make compiler` | Build SHC + inject SHC + sample .shadow files |
+| `make browser-all` | Build kernel + BROWSER + write to disk in one shot |
+| `make lynx` | Build the SystrixLynx text-mode browser (LYNX) |
+| `make addlynx` | Inject LYNX into the FAT32 partition |
+| `make lynx-all` | Build kernel + LYNX + write to disk in one shot |
+| `make compiler` | Build SHC + inject SHC + sample `.shadow` files |
+| `make addshadow` | Inject FIB.SHA and HELLO.SHA shadow scripts to disk |
 | `make programs` | Build HELLO_C, MYPROGRAM, POSIX_TEST and inject all |
 | `make hello` | Build HELLO_C binary only |
+| `make ipc_demo` | Build and inject ECHO_SRV + ECHO_CLI IPC demo binaries |
 | `make addprog PROG=./mybinary` | Inject any ELF binary into the disk |
 | `make clean` | Remove all build artifacts |
 
@@ -220,24 +255,37 @@ sudo dnf install gcc binutils mtools qemu-system-x86
 
 ```bash
 git clone <repo>
-cd Systrix-0.1
+cd SystrixOS-main
 
 # Build kernel + disk image
 make
 
-# Optionally inject the browser and compiler
+# Optionally inject the graphical browser, text browser, and compiler
 make browser addbrowser
+make lynx addlynx
 make compiler
 
 # Launch
 make run
 ```
 
+### Syncing Files into the OS
+
+Any files placed in `home/` on the host will appear in the OS filesystem root (`/`) on the next boot. Filenames are automatically uppercased (e.g. `example.md` → `EXAMPLE.MD`) to satisfy FAT32 8.3 lookup.
+
+```bash
+cp my_photo.png home/
+make synchome
+make run
+# Inside Systrix:
+# systrix$ photo MY_PHOTO.PNG
+```
+
 ### QEMU Flags Used
 
 ```
 -drive format=raw,file=systrix.img,if=ide   # raw disk image via IDE
--m 128M                                     # 128 MB RAM (increase freely: -m 512M, -m 2G)
+-m 1G                                       # 1 GB RAM (adjustable; e.g. -m 512M, -m 2G)
 -machine pc,accel=tcg                       # PC machine, software emulation
 -device bochs-display,xres=1024,yres=768   # 1024×768 framebuffer
 -netdev user,id=net0                        # user-mode NAT networking
@@ -246,7 +294,7 @@ make run
 -audiodev sdl,id=snd0
 ```
 
-> **Tip:** To give Systrix OS more RAM, add `-m 256M` (or any value) to the QEMU run line in the Makefile. The E820 PMM will discover and use all of it automatically.
+> **Tip:** To give Systrix OS more RAM, adjust the `-m` value in the Makefile's `run` target (currently `1G`). The E820 PMM will discover and use all of it automatically.
 
 ### Compiler Flags Explained
 
@@ -629,7 +677,7 @@ i64 sys_ipc_recv(void *out_msg);          // blocks until a message arrives
 
 ### 7.14 Networking (E1000 + TCP/IP)
 
-**Files:** `kernel/e1000.c`, `kernel/net.c`
+**Files:** `kernel/e1000.c`, `kernel/net.c`, `kernel/tcpip.c`
 
 **E1000 NIC driver** (`e1000.c`):
 - Finds the Intel E1000 via PCI (vendor 0x8086, device 0x100E)
@@ -637,7 +685,7 @@ i64 sys_ipc_recv(void *out_msg);          // blocks until a message arrives
 - Reads MAC from RAL0/RAH0 registers
 - `nic_send()` / `nic_poll()` for transmit and receive
 
-**TCP/IP stack** (`net.c`):
+**TCP/IP stack** (`net.c`, `tcpip.c`):
 - **ARP**: request/reply, cache
 - **IPv4**: fragment-free, TTL=64
 - **ICMP**: echo (ping) request/reply
@@ -680,6 +728,8 @@ u32 usb_msc_block_size(int idx);
 int usb_msc_read(int dev_idx, u64 lba, u32 count, void *buf);
 int usb_msc_write(int dev_idx, u64 lba, u32 count, void *buf);
 ```
+
+Use `lsusb` at the shell to list all enumerated USB devices.
 
 ### 7.16 PCI / PCIe Enumeration
 
@@ -819,11 +869,36 @@ void fb_draw_shadow(int x, int y, int w, int h);
 void fb_blit(int dx, int dy, int w, int h, const u32 *src, int src_stride);
 int  fb_get_width(void);
 int  fb_get_height(void);
+int  fb_is_enabled(void);
 ```
 
 Default resolution: **1024 × 768**. The `720p` shell command switches to 1280×720; `1080p` switches to 1920×1080.
 
-### 7.21 GUI Desktop
+### 7.21 Graphics Subsystem (gfx)
+
+**File:** `kernel/gfx.c`
+
+A double-buffered sprite and tilemap system layered on top of `fbdev`:
+
+**Double buffering:** The bochs-display virtual framebuffer is set to double height (`VIRT_HEIGHT = 1536` for 768p mode). The front page is at Y offset 0 and the back page at Y offset 768. `sys_gfx_flip()` waits for vertical retrace then sets the VBE Y-offset register to swap pages with zero tearing.
+
+**Sprite blitter:** `sys_gfx_blit()` copies a user-supplied pixel buffer onto the back buffer with full clipping and optional colorkey transparency. Set colorkey once with `sys_gfx_set_colorkey()`; pass `GFX_COLORKEY_NONE (0xFFFFFFFF)` to disable.
+
+**Tilemap renderer:** `sys_gfx_set_tilemap()` registers a tileset and tile map for one of two layers. `sys_gfx_render_layer()` draws the full layer to the back buffer with scroll offsets for camera panning across maps larger than the screen.
+
+**Syscall numbers:**
+
+| # | Name | Description |
+|---|---|---|
+| 310 | `sys_gfx_flip` | Swap front/back buffers |
+| 311 | `sys_gfx_clear` | Fill back buffer with color |
+| 312 | `sys_gfx_blit` | Copy sprite to back buffer |
+| 313 | `sys_gfx_set_colorkey` | Set transparent color |
+| 314 | `sys_gfx_draw_tile` | Draw a single tile |
+| 315 | `sys_gfx_set_tilemap` | Register a tilemap layer |
+| 316 | `sys_gfx_render_layer` | Render a tilemap layer with scroll |
+
+### 7.22 GUI Desktop
 
 **File:** `kernel/gui.c`
 
@@ -846,7 +921,7 @@ void gui_window_set_active(int id);
 
 Launch from the shell with `gui`. Type `720p` or `1080p` while GUI is active to change resolution.
 
-### 7.22 PS/2 Keyboard & Mouse
+### 7.23 PS/2 Keyboard & Mouse
 
 **File:** `kernel/ps2.c`
 
@@ -861,7 +936,7 @@ Full i8042 controller init:
 
 Polled (no IRQ): the shell loop calls `ps2_poll()` to read scancodes. Mouse: 3-byte packets, delta X/Y decoded with sign extension from packet byte 0 flags.
 
-### 7.23 Input Subsystem
+### 7.24 Input Subsystem
 
 **File:** `kernel/input.c`
 
@@ -875,7 +950,7 @@ i64 sys_poll_pad(void *buf);                       // SYS_POLL_PAD = 302
 
 Mouse grab mode (`sys_mouse_setmode()`) locks the pointer for first-person games.
 
-### 7.24 ACPI
+### 7.25 ACPI
 
 **File:** `kernel/acpi.c`
 
@@ -891,13 +966,13 @@ void acpi_reboot(void);      // writes 0x06 to ACPI reset register
 void acpi_shutdown(void);    // writes ACPI S5 sleep type to PM1a_CNT
 ```
 
-### 7.25 TSS & Privilege Switching
+### 7.26 TSS & Privilege Switching
 
 **File:** `kernel/tss.c`
 
 The Task State Segment stores `RSP0` — the kernel stack pointer loaded on ring-3 → ring-0 transition. `tss_init()` installs the TSS descriptor in the GDT and executes `ltr` to load it. On every context switch, RSP0 is updated to the new process's kernel stack top.
 
-### 7.26 Security (KASLR, SMAP/SMEP, Stack Canaries)
+### 7.27 Security (KASLR, SMAP/SMEP, Stack Canaries)
 
 **File:** `kernel/security.c`
 
@@ -907,7 +982,7 @@ The Task State Segment stores `RSP0` — the kernel stack pointer loaded on ring
 - **User pointer validation**: `copy_from_user()` / `copy_to_user()` validate address ranges before any kernel memcpy from/to user buffers
 - **Syscall argument validation**: `syscall_validate_args()` checks all pointer arguments for each syscall before dispatch
 
-### 7.27 Resilience (SMP, OOM, Watchdog, Panic)
+### 7.28 Resilience (SMP, OOM, Watchdog, Panic)
 
 **File:** `kernel/resilience.c`
 
@@ -919,23 +994,39 @@ The Task State Segment stores `RSP0` — the kernel stack pointer loaded on ring
 
 **Panic:** `kernel_panic(reason)` prints the reason, disables interrupts, and halts.
 
-### 7.28 Swap
+### 7.29 Swap
 
 **File:** `kernel/swap.c`
 
 When a process's working set exceeds available physical memory, `swap_out()` writes a page to the swap area on disk and marks the PTE as not-present with a swap slot encoded in the PTE bits. On the next access, a page fault calls `swap_in()` to reload the page. `swap_invalidate_pid()` frees all swap slots for an exiting process.
 
-### 7.29 Package Manager
+### 7.30 Package Manager
 
 **File:** `kernel/pkgmgr.c`
 
 An in-memory package registry (no actual download infrastructure yet). `pkg_add()` registers a package name, description, URL, and size. `pkg_list()` prints the registry. `pkg_install()` is a stub that prints what would happen. Syscall numbers: `SYS_PKG_INSTALL=350`, `SYS_PKG_REMOVE=351`, `SYS_PKG_LIST=352`.
 
+### 7.31 PNG Viewer
+
+**File:** `kernel/pngview.c`
+
+A kernel-side PNG decoder and photo viewer accessed via the `photo <file.png>` shell command.
+
+Supported PNG format:
+- RGB 8-bit colour depth (IHDR colour type 2)
+- Deflate-compressed IDAT using uncompressed blocks (BTYPE=00)
+- Multiple IDAT chunks concatenated transparently
+- PNG filter types 0–4 on each scanline
+
+The image is centred on the framebuffer with a dark border. Press **ESC** to return to the CLI. If the framebuffer is not active the command prints an error.
+
+> **Note:** Only uncompressed-block deflate is supported — PNGs produced by Systrix's own `png_encode()` (in `browser/png.c`) will always work. PNGs from other tools will work only if their deflate stream uses uncompressed blocks.
+
 ---
 
 ## 8. Shell Reference
 
-The Systrix shell is embedded in `kernel_main()`. It supports a 16-entry command history (Up/Down arrows) and Shift+PageUp/PageDown scrollback (200 rows).
+The Systrix shell (`kernel/shell.c`) supports a 16-entry command history (Up/Down arrows), Shift+PageUp/PageDown scrollback (200 rows), shell variables (`$VAR`), I/O redirection (`<`, `>`/`>>`), pipelines (`|`), and background jobs (`&`).
 
 ### File System Commands
 
@@ -953,6 +1044,7 @@ The Systrix shell is embedded in `kernel_main()`. It supports a 16-entry command
 | `find [pattern]` | Search filenames recursively |
 | `df` | Disk free space on FAT32 partition |
 | `touch <file>` | Create an empty file |
+| `mktxt <f1> [f2] ...` | Create one or more text files at once |
 | `write <file> <text>` | Overwrite file with text |
 | `append <file> <text>` | Append a line to a file |
 | `rm <file>` | Delete a file |
@@ -962,24 +1054,22 @@ The Systrix shell is embedded in `kernel_main()`. It supports a 16-entry command
 | `rmdir <dir>` | Remove an empty directory |
 | `echo <text>` | Print text |
 
-### Process Commands
+### Process & System Commands
 
 | Command | Description |
 |---|---|
 | `elf <file>` | Load and run an ELF64 binary from FAT32 |
 | `run <file>` | Alias for `elf` |
 | `ps` | List all running processes (PID, state, name) |
-
-### System Commands
-
-| Command | Description |
-|---|---|
 | `meminfo` | Physical memory stats (total, used, free pages) |
 | `uname` | OS name, version, architecture |
 | `uptime` | Seconds since boot (PIT tick count) |
+| `calc <n> <op> <n>` | Simple calculator (e.g. `calc 6 * 7`) |
 | `clear` | Clear the VGA terminal |
 | `reboot` | Reboot via 8042 command (port 0x64 ← 0xFE) |
 | `halt` | Halt the CPU (CLI + HLT) |
+| `help` | Print a summary of all commands |
+| `exit` | Exit the current shell session |
 | `shc` | Print SHC compiler info |
 
 ### Network Commands
@@ -992,14 +1082,22 @@ The Systrix shell is embedded in `kernel_main()`. It supports a 16-entry command
 | `serve [port]` | Start the built-in HTTP file server (default port 80) |
 | `netcat [port]` | Listen on a TCP port and print received data |
 
-### GUI Commands
+### GUI & Display Commands
 
 | Command | Description |
 |---|---|
 | `gui` | Launch the framebuffer GUI desktop |
-| `browser` | Launch the built-in web browser (requires BROWSER binary on disk) |
+| `browser` | Launch the graphical web browser (requires BROWSER binary on disk) |
+| `photo <file.png>` | View a PNG image in the framebuffer (ESC to return) |
 | `720p` | Switch display to 1280×720 |
 | `1080p` | Switch display to 1920×1080 |
+
+### IPC & USB Commands
+
+| Command | Description |
+|---|---|
+| `ipc` | List all registered IPC servers (`ipc_dump_servers()`) |
+| `lsusb` | List all enumerated USB devices |
 
 ---
 
@@ -1029,7 +1127,25 @@ The ELF entry point `_start`:
 4. Calls `main()`
 5. Moves return value to `rdi`, executes `syscall` with `rax=60` (exit)
 
-### 9.3 libc.h / libc.c
+### 9.3 systrix_libc — Shared Kernel/User C Library
+
+**Files:** `libc/systrix_libc.c`, `libc/systrix_libc.h`
+
+A standalone C utility library shared by the kernel and user programs, compiled with `-ffreestanding -nostdlib -nostdinc`. It is linked directly into the kernel (`libc/systrix_libc.o`) and available to user programs via `#include "libc/systrix_libc.h"`.
+
+For full documentation see `slibc_reference.md`. Highlights:
+
+- **Types & aliases**: `u8`, `u16`, `u32`, `u64`, `i64`, `usize`, `bool`, standard `stdint.h`-compatible types
+- **Memory**: `memcpy`, `memmove`, `memset`, `memcmp`, `memchr`
+- **Strings**: `strlen`, `strcmp`, `strncmp`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strchr`, `strrchr`, `strstr`, `strdup`, `strtok`, `strtol`, `strtoul`, `strtod`, `atoi`, `atof`, `strlcpy`
+- **Formatted output**: `kprintf`-style formatted printing
+- **Integer math & bit ops**: `clz`, `ctz`, `popcount`, `log2`, `align_up`, `align_down`
+- **Data structures**: ring buffer (`sring`), bitmap (`sbitmap`), linked list (`slistnode`), memory pool (`spool`), dynamic string builder (`sstrbuf`)
+- **Utilities**: `qsort`, `bsearch`, `rand`, `srand`, base64 encode/decode, UUID generation (`suuid`), config parser (`scfg`), path utilities, hashing, `setjmp`/`longjmp`
+- **Debug**: `kassert`, `kdebug_hex`, `kdebug_str`
+- **Error codes**: full errno-compatible set with `strerror()`
+
+### 9.4 libc.h / libc.c — User-Space C Library
 
 A near-complete C standard library for Systrix user programs. Highlights:
 
@@ -1049,7 +1165,7 @@ A near-complete C standard library for Systrix user programs. Highlights:
 
 **env:** `environ` array, `env_init_defaults()` seeds 10 standard variables
 
-### 9.4 libm.h — Math Library
+### 9.5 libm.h — Math Library
 
 **File:** `user/libm.h` (header-only)
 
@@ -1057,7 +1173,7 @@ Full math library in a single header. All functions available in both `double` a
 
 `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `exp`, `exp2`, `log`, `log2`, `log10`, `pow`, `sqrt`, `cbrt`, `hypot`, `floor`, `ceil`, `round`, `trunc`, `fabs`, `fmod`, `modf`, `frexp`, `ldexp`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `isinf`, `isnan`, `isfinite`
 
-### 9.5 pthread.h — Threading
+### 9.6 pthread.h — Threading
 
 **File:** `user/pthread.h` (header-only)
 
@@ -1080,7 +1196,7 @@ int pthread_cond_destroy(pthread_cond_t *c);
 
 Mutexes are implemented using `futex()` — no busy-waiting.
 
-### 9.6 tls.h — TLS 1.2 Client
+### 9.7 tls.h — TLS 1.2 Client
 
 **File:** `user/tls.h` (header-only)
 
@@ -1102,7 +1218,7 @@ int      tls_read(TlsConn *c, void *buf, size_t len);
 void     tls_close(TlsConn *c);
 ```
 
-### 9.7 ipc.h — IPC Messaging
+### 9.8 ipc.h — IPC Messaging
 
 **File:** `user/ipc.h`
 
@@ -1120,7 +1236,7 @@ long ipc_send(long dest_pid, IpcMsg *msg);
 long ipc_recv(IpcMsg *msg);
 ```
 
-### 9.8 gfx.h — Graphics API
+### 9.9 gfx.h — Graphics API
 
 **File:** `user/gfx.h`
 
@@ -1140,7 +1256,7 @@ void set_colorkey(uint32_t color);
 
 `GfxTilemap` holds a pointer to the tile pixel data, the tile map array, tile dimensions, and map dimensions. Colorkey `0xFFFFFFFF` disables transparency.
 
-### 9.9 sound.h — Audio API
+### 9.10 sound.h — Audio API
 
 **File:** `user/sound.h`
 
@@ -1190,7 +1306,7 @@ make addprog PROG=HELLO
 # Boot and run
 make run
 # At Systrix shell:
-# systrix:/$ elf HELLO
+# systrix$ elf HELLO
 ```
 
 ### Using threads
@@ -1244,6 +1360,17 @@ int main(void) {
 
 Link with `user/gfx.h` — no extra `.o` needed (header-only inline wrappers).
 
+### IPC echo server/client demo
+
+```bash
+make ipc_demo
+make run
+# At Systrix shell:
+# systrix$ elf ECHO_SRV   # start server
+# systrix$ elf ECHO_CLI   # run client — prints: IPC round-trip OK!
+# systrix$ ipc            # list registered servers
+```
+
 ---
 
 ## 11. SHC — The Shadow Scripting Compiler
@@ -1280,11 +1407,11 @@ print fib(10)
 ### Usage inside Systrix
 
 ```
-systrix:/$ elf SHC
+systrix$ elf SHC
 SHC> (enter source file name, e.g. FIB.SHA)
 FIB.SHA
 (compiles to FIB)
-systrix:/$ elf FIB
+systrix$ elf FIB
 55
 ```
 
@@ -1292,7 +1419,11 @@ systrix:/$ elf FIB
 
 ## 12. Browser
 
-**File:** `browser/browser.c` + `browser/{html,css,layout,render}.h`
+Systrix OS includes two browsers: a full graphical browser and a Lynx-style text-mode browser.
+
+### 12.1 Graphical Browser (BROWSER)
+
+**File:** `browser/browser.c` + `browser/{html,css,layout,render,png}.h`
 
 A graphical web browser that runs as a normal user-space ELF binary.
 
@@ -1302,6 +1433,7 @@ A graphical web browser that runs as a normal user-space ELF binary.
 - CSS property parser (color, font-size, display, margin, padding, background)
 - Block/inline layout engine
 - Framebuffer renderer (text glyphs from `font8x8.h`, colored boxes)
+- PNG image support via `browser/png.c`
 - URL bar navigation
 
 **Build and run:**
@@ -1310,6 +1442,27 @@ make browser addbrowser
 make run
 # At shell:
 elf BROWSER
+```
+
+### 12.2 SystrixLynx — Text-Mode Browser (LYNX)
+
+**File:** `browser/lynx.c`
+
+A Lynx-style text-mode HTTP browser for use without the GUI.
+
+**Features:**
+- HTTP fetch via Systrix syscalls
+- HTML → plain-text renderer (headings, paragraphs, links, lists)
+- Numbered links, keyboard navigation (arrows, Enter, `b` for back, `g` for go, `q` to quit)
+- Scrollable pager, URL history (back stack)
+- VGA 80×25 text display — no ANSI codes needed
+
+**Build and run:**
+```bash
+make lynx addlynx
+make run
+# At shell:
+elf LYNX
 ```
 
 ---
@@ -1417,7 +1570,7 @@ A: Not directly. Systrix has a Linux-compatible syscall numbering, but it does n
 
 **Q: How much RAM can Systrix OS use?**
 
-A: Any amount QEMU is given (via `-m`). The bootloader runs `INT 15h/E820` to query the full BIOS memory map, and the PMM feeds every usable page into the buddy allocator. There is a compile-time ceiling of `RAM_END_MAX = 64 GB` for static bitmap sizing, but runtime can go much higher with a recompile.
+A: Any amount QEMU is given (via `-m`). The default Makefile run target passes `-m 1G`. The bootloader runs `INT 15h/E820` to query the full BIOS memory map, and the PMM feeds every usable page into the buddy allocator. There is a compile-time ceiling of `RAM_END_MAX = 64 GB` for static bitmap sizing, but runtime can go much higher with a recompile.
 
 > **Known bug:** `meminfo` may report ~4 GB total even with a smaller QEMU `-m` value, due to a `end_pfn` calculation issue in `pmm_init()`.
 
@@ -1452,7 +1605,7 @@ For HTTPS, wrap the socket with `tls_connect()` from `tls.h`.
 
 **Q: How does the IPC system work?**
 
-A: A process calls `ipc_register("myserver")` to publish its name. Clients call `ipc_lookup("myserver")` to get the server's PID, then `ipc_send(pid, &msg)`. The kernel delivers the message and the server receives it via `ipc_recv(&msg)`. Messages are 64 bytes fixed. The kernel blocks `ipc_recv()` callers until a message arrives (process state → `PSTATE_BLOCKED`).
+A: A process calls `ipc_register("myserver")` to publish its name. Clients call `ipc_lookup("myserver")` to get the server's PID, then `ipc_send(pid, &msg)`. The kernel delivers the message and the server receives it via `ipc_recv(&msg)`. Messages are 64 bytes fixed. The kernel blocks `ipc_recv()` callers until a message arrives (process state → `PSTATE_BLOCKED`). Use `ipc` at the shell to list all currently registered servers.
 
 ---
 
@@ -1525,6 +1678,16 @@ A: `make compiler` builds SHC and injects it along with sample `.shadow` files i
 
 ---
 
+**Q: How do I view PNG images?**
+
+A: Place the PNG in `home/`, run `make synchome`, then boot. At the shell:
+```
+systrix$ photo MY_PHOTO.PNG
+```
+Press **ESC** to return to the CLI. Only PNGs using uncompressed deflate blocks are supported (see §7.31).
+
+---
+
 **Q: Does Systrix OS support SMP (multiple CPU cores)?**
 
 A: Partially. `smp_init()` sends INIT+SIPI signals to all Application Processors found in the ACPI MADT, and they enter 64-bit mode. However, only core 0 (the Bootstrap Processor) runs the scheduler and handles interrupts. The APs spin-wait. Full SMP scheduling is on the roadmap.
@@ -1546,6 +1709,12 @@ A: Theoretically yes, for machines with a legacy BIOS and an IDE/SATA controller
 
 ---
 
+**Q: Does the shell support pipelines and redirection?**
+
+A: Yes. The shell (`kernel/shell.c`) parses full pipelines with `|`, input/output redirection with `<` and `>`/`>>`, background jobs with `&`, and shell variables with `$VAR`. Up to 16 pipeline stages are supported.
+
+---
+
 ## 15. Known Bugs & Limitations
 
 | Issue | Detail |
@@ -1562,12 +1731,13 @@ A: Theoretically yes, for machines with a legacy BIOS and an IDE/SATA controller
 | HD Audio not implemented | Only SB16 PCM + OPL2 FM are supported |
 | Browser TLS: xorshift64 PRNG | Not cryptographically strong; fine for a hobby OS, not for real use |
 | Stack canary not injected at compile time | `stack_canary_generate()` exists but the kernel does not use `-fstack-protector` in `CFLAGS` |
+| PNG viewer: uncompressed deflate only | `photo` only supports PNGs with BTYPE=00 (uncompressed) deflate blocks |
 
 ---
 
 ## 16. Roadmap
 
-Based on the `work.md` dev log, all items from the browser porting checklist are complete. Planned next steps:
+Planned next steps:
 
 - **HD Audio driver** — Intel HDA (PCI class 04:03) to replace the SB16 PCM path
 - **Full SMP scheduling** — per-CPU run queues, IPI-based preemption, spinlock audit
@@ -1580,6 +1750,7 @@ Based on the `work.md` dev log, all items from the browser porting checklist are
 - **Dynamic linker** — `ld.so` stub to support shared libraries
 - **procfs / devfs** — virtual filesystems at `/proc` and `/dev`
 - **Network stack improvements** — UDP multicast, TCP retransmit, window scaling, IPv6
+- **PNG viewer: full deflate** — support standard compressed PNGs from external tools
 
 ---
 
