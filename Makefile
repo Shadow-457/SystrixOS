@@ -190,10 +190,10 @@ user/malloc.o: user/malloc.c user/libc.h
 user/crt0.o: user/crt0.S
 	$(AS) --64 -o $@ $<
 
-user/hello.o: user/hello.c
+user/hello.o: examples/c/hello.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
-user/myprogram.o: user/myprogram.c
+user/myprogram.o: examples/c/myprogram.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
 HELLO_C: user/crt0.o user/libc.o user/hello.o
@@ -211,7 +211,7 @@ myprog: MYPROGRAM
 	@echo "Built MYPROGRAM -- add to disk with: make addprog PROG=MYPROGRAM"
 
 # -- Build all user programs and embed them in the disk image ------
-user/posix_test.o: user/posix_test.c
+user/posix_test.o: examples/c/posix_test.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
 POSIX_TEST: user/crt0.o user/libc.o user/posix_test.o
@@ -294,10 +294,10 @@ clean:
 .PHONY: all run run-quiet hello myprog programs addprog clean
 
 # -- IPC echo server/client (microkernel demo) ---------------------
-user/echo_server.o: user/echo_server.c user/ipc.h
+user/echo_server.o: examples/c/echo_server.c user/ipc.h
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
-user/echo_client.o: user/echo_client.c user/ipc.h
+user/echo_client.o: examples/c/echo_client.c user/ipc.h
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
 ECHO_SRV: user/crt0.o user/libc.o user/echo_server.o
