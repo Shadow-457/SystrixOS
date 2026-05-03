@@ -114,7 +114,7 @@ static void parse_madt(void){
 /* ── acpi_init ───────────────────────────────────────────────── */
 void acpi_init(void){
     g_rsdp=find_rsdp();
-    if(!g_rsdp){kprintf("[ACPI] no RSDP\r\n");return;}
+    if(!g_rsdp){print_str("[ACPI] no RSDP\r\n");return;}
 
     /* Prefer XSDT (ACPI 2.0+) */
     if(g_rsdp->rev>=2 && g_rsdp->xsdt_pa){
@@ -141,19 +141,19 @@ done:
     /* Hand MCFG base to PCI driver */
     if(g_mcfg){
         pci_set_ecam(g_mcfg->entries[0].base, g_mcfg->entries[0].s_bus);
-        kprintf("[ACPI] PCIe ECAM @ ");
+        print_str("[ACPI] PCIe ECAM @ ");
         print_hex_byte((u8)(g_mcfg->entries[0].base>>24));
         print_hex_byte((u8)(g_mcfg->entries[0].base>>16));
         print_hex_byte((u8)(g_mcfg->entries[0].base>>8));
         print_hex_byte((u8) g_mcfg->entries[0].base);
-        kprintf("\r\n");
+        print_str("\r\n");
     }
 
-    kprintf("[ACPI] OK");
-    if(g_fadt) kprintf(" FADT");
-    if(g_madt) kprintf(" MADT");
-    if(g_ioapic_pa){kprintf(" IOAPIC@");print_hex_byte((u8)(g_ioapic_pa>>24));print_hex_byte((u8)(g_ioapic_pa>>16));print_hex_byte((u8)(g_ioapic_pa>>8));print_hex_byte((u8)g_ioapic_pa);}
-    kprintf("\r\n");
+    print_str("[ACPI] OK");
+    if(g_fadt) print_str(" FADT");
+    if(g_madt) print_str(" MADT");
+    if(g_ioapic_pa){print_str(" IOAPIC@");print_hex_byte((u8)(g_ioapic_pa>>24));print_hex_byte((u8)(g_ioapic_pa>>16));print_hex_byte((u8)(g_ioapic_pa>>8));print_hex_byte((u8)g_ioapic_pa);}
+    print_str("\r\n");
 }
 
 /* ── ACPI power management ───────────────────────────────────── */
@@ -186,7 +186,7 @@ void acpi_reboot(void){
 
 /* ── I/O APIC ────────────────────────────────────────────────── */
 void acpi_ioapic_init(void){
-    if(!g_ioapic_pa){kprintf("[ACPI] no IOAPIC\r\n");return;}
+    if(!g_ioapic_pa){print_str("[ACPI] no IOAPIC\r\n");return;}
 }
 
 static volatile u32 *ioapic_reg(u32 off){return (volatile u32*)(usize)(g_ioapic_pa+off);}

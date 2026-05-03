@@ -62,12 +62,10 @@ static void vbe_write(u16 idx, u16 val) {
 #define VGA_INPUT_STATUS1  0x3DA   /* bit 3 = vblank active */
 
 static void vsync_wait(void) {
-    u32 timeout = 1000000;
     /* Wait for vblank to END (so we enter the active period) */
-    while ((inb(VGA_INPUT_STATUS1) & 0x08) && --timeout) { watchdog_pet(); }
+    while ( inb(VGA_INPUT_STATUS1) & 0x08) {}
     /* Wait for vblank to START */
-    timeout = 1000000;
-    while (!(inb(VGA_INPUT_STATUS1) & 0x08) && --timeout) { watchdog_pet(); }
+    while (!(inb(VGA_INPUT_STATUS1) & 0x08)) {}
 }
 
 /* ── Double-buffer state ─────────────────────────────────────── */

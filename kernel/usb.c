@@ -485,9 +485,9 @@ static void ehci_init_one(u8 bus, u8 sl, u8 fn) {
     e->active    = 1;
     g_n_ehci++;
 
-    kprintf("[EHCI] init OK ");
+    print_str("[EHCI] init OK ");
     print_hex_byte((u8)e->n_ports);
-    kprintf(" ports\r\n");
+    print_str(" ports\r\n");
 }
 
 /* ================================================================
@@ -620,9 +620,12 @@ static void usb_enumerate_device(int ctrlr_type, int ctrlr_idx, u8 speed) {
     dev->valid = 1;
     g_n_usb_dev++;
 
-    kprintf("[USB] addr=%02X class=%02X", (unsigned)(new_addr), (unsigned)(dev->class_code));
-    kprintf(":"); print_hex_byte(dev->subclass);
-    kprintf("\r\n");
+    print_str("[USB] addr=");
+    print_hex_byte(new_addr);
+    print_str(" class=");
+    print_hex_byte(dev->class_code);
+    print_str(":"); print_hex_byte(dev->subclass);
+    print_str("\r\n");
 }
 
 /* ================================================================
@@ -799,14 +802,14 @@ static void probe_msc(UsbDevice *dev, int dev_idx) {
     m->valid = 1;
     g_n_usb_msc++;
 
-    kprintf("[USB-MSC] drive ");
+    print_str("[USB-MSC] drive ");
     print_hex_byte((u8)(g_n_usb_msc - 1));
-    kprintf(": ");
+    print_str(": ");
     /* print block count in decimal (rough) */
     u64 mb = (m->block_count * m->block_size) >> 20;
-    if (mb > 999999) { print_hex_byte((u8)(mb>>24)); kprintf("G+"); }
-    else { print_hex_byte((u8)(mb >> 8)); print_hex_byte((u8)mb); kprintf(" MB"); }
-    kprintf("\r\n");
+    if (mb > 999999) { print_hex_byte((u8)(mb>>24)); print_str("G+"); }
+    else { print_hex_byte((u8)(mb >> 8)); print_hex_byte((u8)mb); print_str(" MB"); }
+    print_str("\r\n");
 }
 
 /* ================================================================
@@ -1177,9 +1180,11 @@ static void x2_enumerate_port(Xhci2 *x, u32 port) {
         }
     }
 
-    kprintf("[XHCI] slot ");
+    print_str("[XHCI] slot ");
     print_hex_byte((u8)slot_id);
-    kprintf(" addr %02X\r\n", (unsigned)(dev_addr));
+    print_str(" addr ");
+    print_hex_byte(dev_addr);
+    print_str("\r\n");
 }
 
 /* Decode keyboard boot-protocol HID report */
@@ -1342,9 +1347,9 @@ static void x2_init_one(u8 bus, u8 sl, u8 fn) {
     x->active = 1;
     g_n_xhci2++;
 
-    kprintf("[XHCI2] init OK ");
+    print_str("[XHCI2] init OK ");
     print_hex_byte((u8)x->n_ports);
-    kprintf(" ports\r\n");
+    print_str(" ports\r\n");
 }
 
 /* ================================================================
@@ -1367,10 +1372,10 @@ void usb_full_init(void) {
             if (cls != 0x0C || sub != 0x03) continue;
 
             if (pif == 0x20) {
-                kprintf("[PCI] EHCI found\r\n");
+                print_str("[PCI] EHCI found\r\n");
                 ehci_init_one((u8)bus, (u8)slot, 0);
             } else if (pif == 0x30) {
-                kprintf("[PCI] XHCI found\r\n");
+                print_str("[PCI] XHCI found\r\n");
                 x2_init_one((u8)bus, (u8)slot, 0);
             }
             /* UHCI/OHCI: rely on BIOS PS/2 emulation (ps2.c) */
@@ -1389,35 +1394,35 @@ void usb_full_poll(void) {
 
 /* Shell helpers */
 void usb_list_devices(void) {
-    kprintf("USB Devices:\r\n");
-    if (!g_n_usb_dev) { kprintf("  (none)\r\n"); return; }
+    print_str("USB Devices:\r\n");
+    if (!g_n_usb_dev) { print_str("  (none)\r\n"); return; }
     for (int i = 0; i < g_n_usb_dev; i++) {
         UsbDevice *d = &g_usb_dev[i];
         if (!d->valid) continue;
-        kprintf("  [");
+        print_str("  [");
         print_hex_byte((u8)i);
-        kprintf("] addr="); print_hex_byte(d->address);
-        kprintf(" spd=");   print_hex_byte(d->speed);
-        kprintf(" class="); print_hex_byte(d->class_code);
-        kprintf(":"); print_hex_byte(d->subclass);
-        kprintf(":"); print_hex_byte(d->protocol);
-        if (d->class_code == USB_CLASS_MSC) kprintf(" [MSC]");
-        if (d->class_code == USB_CLASS_HID) kprintf(" [HID]");
-        kprintf("\r\n");
+        print_str("] addr="); print_hex_byte(d->address);
+        print_str(" spd=");   print_hex_byte(d->speed);
+        print_str(" class="); print_hex_byte(d->class_code);
+        print_str(":"); print_hex_byte(d->subclass);
+        print_str(":"); print_hex_byte(d->protocol);
+        if (d->class_code == USB_CLASS_MSC) print_str(" [MSC]");
+        if (d->class_code == USB_CLASS_HID) print_str(" [HID]");
+        print_str("\r\n");
     }
     if (g_n_usb_msc) {
-        kprintf("Mass Storage:\r\n");
+        print_str("Mass Storage:\r\n");
         for (int i = 0; i < g_n_usb_msc; i++) {
             UsbMsc *m = &g_usb_msc[i];
-            kprintf("  usb"); print_hex_byte((u8)i);
-            kprintf(": blksz="); print_hex_byte((u8)(m->block_size>>8));
+            print_str("  usb"); print_hex_byte((u8)i);
+            print_str(": blksz="); print_hex_byte((u8)(m->block_size>>8));
             print_hex_byte((u8)m->block_size);
-            kprintf(" blocks=");
+            print_str(" blocks=");
             print_hex_byte((u8)(m->block_count>>24));
             print_hex_byte((u8)(m->block_count>>16));
             print_hex_byte((u8)(m->block_count>>8));
             print_hex_byte((u8)(m->block_count));
-            kprintf("\r\n");
+            print_str("\r\n");
         }
     }
 }

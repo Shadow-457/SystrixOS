@@ -253,7 +253,7 @@ void ahci_init(u32 bar){
         pt->cmd_tbl =(AhciCmdTbl*)alloc_aligned(sizeof(AhciCmdTbl),128);
         pt->data_buf=(u8*)        alloc_aligned(512*MAX_SECTORS_PER_CMD,512);
         if(!pt->cmd_list||!pt->fis_buf||!pt->cmd_tbl||!pt->data_buf){
-            kprintf("[AHCI] alloc fail\r\n"); continue;
+            print_str("[AHCI] alloc fail\r\n"); continue;
         }
         memset(pt->cmd_list,0,sizeof(AhciCmdHdr)*32);
         memset(pt->fis_buf, 0,256);
@@ -276,12 +276,12 @@ void ahci_init(u32 bar){
         { u8 idbuf[512];
           if(ahci_identify(g_nports,idbuf)==0) parse_identify(pt,(u16*)idbuf); }
 
-        kprintf("[AHCI] Port "); print_hex_byte((u8)g_nports);
-        kprintf(": "); kprintf("%s", pt->model); kprintf("\r\n");
+        print_str("[AHCI] Port "); print_hex_byte((u8)g_nports);
+        print_str(": "); print_str(pt->model); print_str("\r\n");
 
         g_nports++;
     }
-    kprintf("[AHCI] "); print_hex_byte((u8)g_nports); kprintf(" drive(s)\r\n");
+    print_str("[AHCI] "); print_hex_byte((u8)g_nports); print_str(" drive(s)\r\n");
 }
 
 /* ── Multi-sector read ────────────────────────────────────────── */

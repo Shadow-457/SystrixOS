@@ -110,22 +110,26 @@ void mem_safety_dump_leaks(void) {
     u32 leak_count = 0;
     u64 leak_bytes = 0;
 
-    kprintf("\n=== Memory Leak Report ===\r\n");
+    print_str("\n=== Memory Leak Report ===\r\n");
 
     for (u32 i = 0; i < alloc_count; i++) {
         if (!alloc_table[i].freed) {
             leak_count++;
             leak_bytes += alloc_table[i].size;
-            kprintf("  LEAK %016llx size=%llu tag=%s\r\n",
+            char buf[80];
+            ksnprintf(buf, sizeof(buf), "  LEAK %016llx size=%llu tag=%s\r\n",
                       (unsigned long long)alloc_table[i].addr,
                       (unsigned long long)alloc_table[i].size,
                       alloc_table[i].tag);
+            print_str(buf);
         }
     }
 
-    kprintf("Total leaks: %u (%llu bytes)\r\n",
+    { char buf[64];
+      ksnprintf(buf, sizeof(buf), "Total leaks: %u (%llu bytes)\r\n",
                 leak_count, (unsigned long long)leak_bytes);
-    kprintf("===========================\r\n");
+      print_str(buf); }
+    print_str("===========================\r\n");
 }
 
 /* ---- Tick counter (call from timer interrupt) ----------------- */
@@ -160,7 +164,7 @@ int mem_safety_redzone_check(void *ptr, u64 size) {
     u8 *front = (u8*)ptr - RED_ZONE_SIZE;
     for (int i = 0; i < RED_ZONE_SIZE; i++) {
         if (front[i] != RED_ZONE_PATTERN) {
-            kprintf("[SAFETY] Buffer underflow detected!\r\n");
+            print_str("[SAFETY] Buffer underflow detected!\r\n");
             ok = 0;
             break;
         }
@@ -170,7 +174,7 @@ int mem_safety_redzone_check(void *ptr, u64 size) {
     u8 *rear = (u8*)ptr + size;
     for (int i = 0; i < RED_ZONE_SIZE; i++) {
         if (rear[i] != RED_ZONE_PATTERN) {
-            kprintf("[SAFETY] Buffer overflow detected!\r\n");
+            print_str("[SAFETY] Buffer overflow detected!\r\n");
             ok = 0;
             break;
         }
@@ -272,8 +276,10 @@ int mem_safety_validate_free(void *ptr) {
 
     /* Check for double-free */
     if (mem_safety_is_freed(addr)) {
-        kprintf("[SAFETY] Double free detected at %016llx\r\n",
+        char buf[48];
+        ksnprintf(buf, sizeof(buf), "[SAFETY] Double free detected at %016llx\r\n",
                   (unsigned long long)addr);
+        print_str(buf);
         return 0;
     }
 
@@ -281,7 +287,7 @@ int mem_safety_validate_free(void *ptr) {
     if (addr < HEAP_BASE || addr >= HEAP_BASE + HEAP_SIZE) {
         /* Could be slab or vmalloc - check those ranges too */
         if (addr < 0xFFFF800000000000ULL || addr >= 0xFFFF800000000000ULL + 256*1024*1024) {
-            kprintf("[SAFETY] Invalid free address!\r\n");
+            print_str("[SAFETY] Invalid free address!\r\n");
             return 0;
         }
     }
@@ -333,13 +339,13 @@ i64 mem_safety_memcpy(void *dst, const void *src, usize n) {
 
     /* Check destination */
     if (!mem_safety_valid_kptr(dst, n)) {
-        kprintf("[SAFETY] Invalid memcpy destination!\r\n");
+        print_str("[SAFETY] Invalid memcpy destination!\r\n");
         return -1;
     }
 
     /* Check source */
     if (!mem_safety_valid_kptr((void*)src, n)) {
-        kprintf("[SAFETY] Invalid memcpy source!\r\n");
+        print_str("[SAFETY] Invalid memcpy source!\r\n");
         return -1;
     }
 
@@ -369,7 +375,9 @@ void mem_safety_init(void) {
 void mem_safety_print_stats(void) {
     if (!SAFETY_ENABLED) return;
 
-    kprintf("\n=== Memory Safety Stats ===\r\n"
+    char buf[96];
+    ksnprintf(buf, sizeof(buf),
+              "\n=== Memory Safety Stats ===\r\n"
               "Tracked allocations: %llu\r\n"
               "Quarantine entries:  %llu\r\n"
               "Tick counter:        %llu\r\n"
@@ -377,4 +385,5 @@ void mem_safety_print_stats(void) {
               (unsigned long long)alloc_count,
               (unsigned long long)quarantine_count,
               (unsigned long long)tick_counter);
+    print_str(buf);
 }

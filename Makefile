@@ -4,14 +4,19 @@ export PATH := $(PATH):/usr/sbin
 #
 #  Targets:
 #    make            -> build systrix.img (bootable disk image)
-#    make run        -> launch in QEMU with debug log
-#    make run-quiet  -> launch in QEMU silently
+#    make run        -> launch in QEMU (512M RAM, bochs-display 1024x768)
+#    make run-debug  -> launch with serial log to qemu.log
+#    make run-quiet  -> launch in QEMU silently (GTK display)
 #    make hello      -> build user/HELLO_C example program
 #    make addprog PROG=path/to/ELF -> add binary to FAT32 partition
 #    make clean      -> remove all build artifacts
 #
 #  Prerequisites:
 #    binutils (as, ld, objcopy), gcc, mtools, qemu-system-x86_64
+#
+#  Day 1 quickstart (Minecraft plan):
+#    make && make run   -> boots to shell, type 'gui' for framebuffer desktop
+#    make run-debug     -> same but logs serial output to qemu.log
 # ================================================================
 
 AS   = as
@@ -26,7 +31,7 @@ QEMU = qemu-system-x86_64
 # the raw code bytes of the handler instead of its address, causing
 # an immediate GPF cascade on the first timer tick.
 CFLAGS = -m64 -ffreestanding -fno-stack-protector -mno-red-zone -fno-pic \
-         -nostdlib -nostdinc -O2 -Iinclude -DSYSTRIX_KERNEL \
+         -nostdlib -nostdinc -O2 -Iinclude \
          -mno-mmx -mno-sse -mno-sse2 -mno-avx -Wall -Wextra -Wno-unused-parameter
 
 KERNEL_ASM_OBJS = \
@@ -34,7 +39,6 @@ KERNEL_ASM_OBJS = \
     kernel/isr.o
 
 KERNEL_C_OBJS = \
-    libc/systrix_libc.o \
     kernel/heap.o      \
     kernel/pmm.o       \
     kernel/vmm.o       \
@@ -76,19 +80,27 @@ KERNEL_C_OBJS = \
     kernel/ps2.o       \
     kernel/e1000.o     \
     kernel/shell.o     \
-    kernel/pkgmgr.o \
-    kernel/pngview.o
+    kernel/pkgmgr.o
 
-KERNEL_OBJS = $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS)
+# -- Driver objects (drivers/ folder) --------------------------------
+DRIVER_OBJS = \
+    drivers/vga.o        \
+    drivers/ata.o        \
+    drivers/idt.o        \
+    drivers/keyboard.o   \
+    drivers/mouse.o      \
+    drivers/rtc.o        \
+    drivers/pit.o        \
+    drivers/pic.o        \
+    drivers/speaker.o    \
+    drivers/uart.o       \
+    drivers/apic.o       \
+    drivers/dma.o        \
+    drivers/fdc.o
 
-# -- Syslibc (shared kernel+user C library) -----------------------
-libc/systrix_libc.o: libc/systrix_libc.c libc/systrix_libc.h
-	$(CC) $(CFLAGS) -Ilibc -c -o $@ $<
+KERNEL_OBJS = $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS) $(DRIVER_OBJS)
 
-# -- Compilation rules ---------------------------------------------
-boot/boot.o: boot/boot.S
-	$(AS) --32 -o $@ $<
-
+# -- Compilation rules -----------------------------------------------
 kernel/entry.o: kernel/entry.S
 	$(AS) --64 -o $@ $<
 
@@ -98,6 +110,10 @@ kernel/isr.o: kernel/isr.S
 kernel/%.o: kernel/%.c include/kernel.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+drivers/%.o: drivers/%.c include/kernel.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+
 # -- Binary images -------------------------------------------------
 #
 # FIX 1 (boot.bin): newer binutils inject .note.gnu.property into
@@ -105,6 +121,9 @@ kernel/%.o: kernel/%.c include/kernel.h
 # boot.bin grows to 1064 bytes instead of 512; the BIOS only loads
 # the first sector, causing an immediate triple fault.
 # Fix: link to a temp ELF first, then strip the section with objcopy.
+boot/boot.o: boot/boot.S
+	$(AS) --32 -o $@ $<
+
 boot.bin: boot/boot.o
 	$(LD) -m elf_i386 -Ttext=0x7C00 -o boot_elf.tmp $<
 	objcopy --remove-section=.note.gnu.property --output-target=binary boot_elf.tmp $@
@@ -118,6 +137,8 @@ kernel.bin: $(KERNEL_OBJS) linker.ld
 fat32.img:
 	dd if=/dev/zero of=$@ bs=1M count=64 status=none
 	mkfs.fat -F 32 -n SYSTRIXOS $@
+	echo "Systrix OS v0.1 (C kernel)" > /tmp/README.TXT
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ /tmp/README.TXT ::/README.TXT
 
 # -- Combined bootable disk image ----------------------------------
 systrix.img: boot.bin kernel.bin fat32.img
@@ -126,7 +147,7 @@ systrix.img: boot.bin kernel.bin fat32.img
 	dd if=kernel.bin of=$@ bs=512 seek=1  conv=notrunc status=none
 	dd if=fat32.img  of=$@ bs=512 seek=512 conv=notrunc status=none
 
-all: systrix.img synchome
+all: systrix.img
 
 # -- QEMU ----------------------------------------------------------
 # Fixed MAC ensures net_init can read it from RAL0/RAH0 before reset.
@@ -138,41 +159,58 @@ DISP = -device bochs-display,xres=1024,yres=768
 USBHID = # PS/2 keyboard+mouse used — GUI polls port 0x60/0x64 directly
 AUDIO = -device sb16,audiodev=snd0 -audiodev sdl,id=snd0
 
-run: synchome
+run: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 1G -no-reboot \
+	        -m 512M -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO)
 
-run-quiet: synchome
+run-quiet: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 1G -no-reboot \
+	        -m 512M -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
 	        -display gtk
 
-run-sdl: synchome
+run-sdl: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 1G -no-reboot \
+	        -m 512M -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
 	        -display sdl
 
-run-nographic: synchome
+# Day 1: debug target — serial log to qemu.log, all output to terminal
+run-debug: systrix.img
 	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 1G -no-reboot \
+	        -m 512M -no-reboot \
+	        -machine pc,accel=tcg \
+	        $(DISP) $(USBHID) \
+	        $(NIC) \
+	        $(AUDIO) \
+	        -serial file:qemu.log \
+	        -d guest_errors,unimp 2>>qemu.log || true
+
+run-nographic: systrix.img
+	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	        -m 512M -no-reboot \
 	        -machine pc,accel=tcg \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
 	        -serial mon:stdio \
 	        -nographic
+
+# -- Engine Compiler (engc) — runs INSIDE EngineOS -------------------
+	      -nostdlib -nostdinc -c -o $@ $<
+
+
+
 
 # -- libc (basic C library for user programs) ----------------------
 # Link user programs with: crt0.o libc.o yourprog.o
@@ -190,10 +228,10 @@ user/malloc.o: user/malloc.c user/libc.h
 user/crt0.o: user/crt0.S
 	$(AS) --64 -o $@ $<
 
-user/hello.o: examples/c/hello.c
+user/hello.o: user/hello.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
-user/myprogram.o: examples/c/myprogram.c
+user/myprogram.o: user/myprogram.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
 HELLO_C: user/crt0.o user/libc.o user/hello.o
@@ -211,7 +249,7 @@ myprog: MYPROGRAM
 	@echo "Built MYPROGRAM -- add to disk with: make addprog PROG=MYPROGRAM"
 
 # -- Build all user programs and embed them in the disk image ------
-user/posix_test.o: examples/c/posix_test.c
+user/posix_test.o: user/posix_test.c
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
 POSIX_TEST: user/crt0.o user/libc.o user/posix_test.o
@@ -222,9 +260,9 @@ posix_test: POSIX_TEST
 	@echo "Built POSIX_TEST -- add to disk with: make addprog PROG=POSIX_TEST"
 
 programs: systrix.img HELLO_C MYPROGRAM POSIX_TEST
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img HELLO_C   ::/HELLO_C
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img MYPROGRAM ::/MYPROGRAM
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img POSIX_TEST ::/POSIX_TEST
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img HELLO_C   ::/HELLO_C
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img MYPROGRAM ::/MYPROGRAM
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img POSIX_TEST ::/POSIX_TEST
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo "Added HELLO_C, MYPROGRAM and POSIX_TEST to systrix.img"
 	@echo "  Boot QEMU then run:  elf POSIX_TEST"
@@ -232,72 +270,30 @@ programs: systrix.img HELLO_C MYPROGRAM POSIX_TEST
 # -- Add a program to the FAT32 partition --------------------------
 # Usage: make addprog PROG=./myapp
 addprog: fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img $(PROG) ::/$(notdir $(PROG))
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img $(PROG) ::/$(notdir $(PROG))
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo "Added $(notdir $(PROG)) to systrix.img -- run with: elf $(notdir $(PROG))"
 
-# -- Sync host home/ folder → OS filesystem root -------------------
-# Place any files you want inside SystrixOS into the host folder ./home/
-# then run:  make synchome
-# They will appear in the OS root ( / ) when you boot.
-#
-# Filenames are auto-uppercased (example.md → EXAMPLE.MD) so the
-# kernel's 8.3 FAT32 lookup always finds them.
-# The FAT32 root is wiped first so it always mirrors home/ exactly.
-synchome: systrix.img
-	@mkdir -p home
-	@if [ -z "$$(find home -maxdepth 1 -mindepth 1 2>/dev/null | head -1)" ]; then \
-	    echo "home/ is empty — add files then run make synchome again."; \
-	else \
-	    echo "Wiping existing files from FAT32 root..."; \
-	    for f in $$(MTOOLS_SKIP_CHECK=1 mdir -i fat32.img ::/ 2>/dev/null | awk '/^[A-Z][A-Z0-9 ]/{n=$$1; e=$$2; gsub(/ /,"",n); gsub(/ /,"",e); if(e!="") print n"."e; else print n}'); do \
-	        MTOOLS_SKIP_CHECK=1 mdel -i fat32.img "::/$$f" 2>/dev/null || true; \
-	    done; \
-	    echo "Syncing home/ → FAT32 filesystem root (names uppercased)..."; \
-	    find home -maxdepth 1 -mindepth 1 | while read item; do \
-	        base=$$(basename "$$item"); \
-	        upper=$$(echo "$$base" | tr '[:lower:]' '[:upper:]'); \
-	        if [ -d "$$item" ]; then \
-	            MTOOLS_SKIP_CHECK=1 MTOOLS_NO_VFAT=1 mcopy -s -o -i fat32.img "$$item" ::/$$upper && \
-	            echo "  dir   $$upper/"; \
-	        else \
-	            MTOOLS_SKIP_CHECK=1 MTOOLS_NO_VFAT=1 mcopy -o -i fat32.img "$$item" ::/$$upper && \
-	            echo "  file  $$upper"; \
-	        fi; \
-	    done; \
-	    dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none; \
-	    echo "Done. OS filesystem root:"; \
-	    MTOOLS_SKIP_CHECK=1 mdir -i fat32.img ::/ 2>/dev/null || true; \
-	    echo "Boot with: make run"; \
-	fi
+# -- Add sample .shadow source files to disk -----------------------
+	@echo "Added FIB.SHA and HELLO.SHA to disk"
 
-# -- Sync home/ then immediately boot ------------------------------
-run-home: synchome
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
-	        -m 1G -no-reboot \
-	        -machine pc,accel=tcg \
-	        $(DISP) $(USBHID) \
-	        $(NIC) \
-	        $(AUDIO)
-
-.PHONY: synchome run-home run run-quiet run-sdl run-nographic
-
+# -- Build compiler + add everything to disk in one shot -----------
 # -- Clean ---------------------------------------------------------
 clean:
-	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp libc/systrix_libc.o
+	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp
 	rm -f boot.bin kernel.bin fat32.img systrix.img
-	rm -f user/crt0.o user/hello.o user/myprogram.o user/libc.o user/echo_server.o user/echo_client.o browser/lynx.o
-	rm -f HELLO_C MYPROGRAM ECHO_SRV ECHO_CLI LYNX
-	rm -f qemu.log
+	rm -f user/crt0.o user/hello.o user/myprogram.o user/libc.o user/echo_server.o user/echo_client.o browser/browser.o
+	rm -f HELLO_C MYPROGRAM ECHO_SRV ECHO_CLI BROWSER
+	rm -f qemu.log /tmp/README.TXT
 	rm -f kernel/fbdev.o kernel/gui.o
 
-.PHONY: all run run-quiet hello myprog programs addprog clean
+.PHONY: all run run-quiet run-sdl run-debug run-nographic hello myprog programs addprog clean
 
 # -- IPC echo server/client (microkernel demo) ---------------------
-user/echo_server.o: examples/c/echo_server.c user/ipc.h
+user/echo_server.o: user/echo_server.c user/ipc.h
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
-user/echo_client.o: examples/c/echo_client.c user/ipc.h
+user/echo_client.o: user/echo_client.c user/ipc.h
 	$(CC) $(UCFLAGS) -c -o $@ $<
 
 ECHO_SRV: user/crt0.o user/libc.o user/echo_server.o
@@ -309,8 +305,8 @@ ECHO_CLI: user/crt0.o user/libc.o user/echo_client.o
 	      -Ttext=0x400000 -o $@ $^
 
 ipc_demo: systrix.img ECHO_SRV ECHO_CLI
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img ECHO_SRV ::/ECHO_SRV
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img ECHO_CLI ::/ECHO_CLI
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img ECHO_SRV ::/ECHO_SRV
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img ECHO_CLI ::/ECHO_CLI
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
 	@echo "Added ECHO_SRV and ECHO_CLI to disk"
 	@echo "  In Systrix shell:"
@@ -320,33 +316,40 @@ ipc_demo: systrix.img ECHO_SRV ECHO_CLI
 
 .PHONY: ipc_demo
 
-# ── SystrixLynx — text-mode browser ──────────────────────────────
+# ── Browser ────────────────────────────────────────────────────────
+# Build flags for browser (needs -Ibrowser -Iuser -Iinclude, no SSE)
 BCFLAGS = -m64 -O2 -ffreestanding -fno-stack-protector -mno-red-zone \
           -fno-pic -nostdlib -nostdinc \
           -Ibrowser -Iuser -Iinclude \
           -mno-mmx -mno-sse -mno-sse2 -mno-avx \
           -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
 
-browser/lynx.o: browser/lynx.c browser/net.h user/libc.h
+browser/browser.o: browser/browser.c browser/net.h browser/html.h \
+                   browser/css.h browser/layout.h browser/render.h \
+                   user/libc.h user/tls.h include/font8x8.h
 	$(CC) $(BCFLAGS) -c -o $@ $<
 
-LYNX_OBJ = user/crt0.o user/libc.o browser/lynx.o
-LYNX: $(LYNX_OBJ)
+BROWSER: user/crt0.o user/libc.o browser/browser.o
 	$(LD) -m elf_x86_64 -static -nostdlib \
 	      -Ttext=0x400000 -o $@ $^
-	@echo "Built LYNX ($$(wc -c < LYNX) bytes)"
+	@echo "Built BROWSER ($(shell wc -c < BROWSER) bytes)"
 
-lynx: LYNX
-	@echo "SystrixLynx ready."
+browser: BROWSER
+	@echo "Browser binary ready. Run: make addbrowser"
 
-addlynx: LYNX fat32.img
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img LYNX ::/LYNX
+addbrowser: BROWSER fat32.img
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img BROWSER ::/BROWSER
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo "LYNX added to systrix.img  ->  boot and run:  elf LYNX"
+	@echo ""
+	@echo "  BROWSER added to systrix.img"
+	@echo "  Boot Systrix OS, then at the shell:"
+	@echo "    elf BROWSER"
+	@echo ""
 
-lynx-all: systrix.img LYNX
-	MTOOLS_SKIP_CHECK=1 mcopy -o -i fat32.img LYNX ::/LYNX
+# One-shot: build kernel + browser + write to disk
+browser-all: systrix.img BROWSER
+	MTOOLS_SKIP_CHECK=1 mcopy -i fat32.img BROWSER ::/BROWSER
 	dd if=fat32.img of=systrix.img bs=512 seek=512 conv=notrunc status=none
-	@echo "systrix.img ready with LYNX. Run: make run"
+	@echo "systrix.img ready with BROWSER. Run: make run"
 
-.PHONY: lynx addlynx lynx-all
+.PHONY: browser addbrowser browser-all

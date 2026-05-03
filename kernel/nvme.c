@@ -171,7 +171,7 @@ static void *alloc_aligned(usize sz, usize align){
 
 /* ── nvme_init ───────────────────────────────────────────────── */
 void nvme_init(u64 bar){
-    if(!bar){ kprintf("[NVMe] no BAR0\r\n"); return; }
+    if(!bar){ print_str("[NVMe] no BAR0\r\n"); return; }
     g_nvme.bar=(u8*)(usize)bar;
     g_nvme.ready=0;
 
@@ -190,7 +190,7 @@ void nvme_init(u64 bar){
     aq->depth = NVME_ADMIN_Q_DEPTH;
     aq->sq=(NvmeSqe*)alloc_aligned(sizeof(NvmeSqe)*NVME_ADMIN_Q_DEPTH, 4096);
     aq->cq=(NvmeCqe*)alloc_aligned(sizeof(NvmeCqe)*NVME_ADMIN_Q_DEPTH, 4096);
-    if(!aq->sq||!aq->cq){ kprintf("[NVMe] admin alloc fail\r\n"); return; }
+    if(!aq->sq||!aq->cq){ print_str("[NVMe] admin alloc fail\r\n"); return; }
     memset(aq->sq,0,sizeof(NvmeSqe)*NVME_ADMIN_Q_DEPTH);
     memset(aq->cq,0,sizeof(NvmeCqe)*NVME_ADMIN_Q_DEPTH);
     aq->sq_tail=0; aq->cq_head=0; aq->cq_phase=1; aq->next_cid=0;
@@ -210,11 +210,11 @@ void nvme_init(u64 bar){
     /* Wait for CSTS.RDY */
     for(int t=200000;t--;){
         u32 csts=nvme_r32(NVME_CSTS);
-        if(csts&CSTS_CFS){ kprintf("[NVMe] controller fatal\r\n"); return; }
+        if(csts&CSTS_CFS){ print_str("[NVMe] controller fatal\r\n"); return; }
         if(csts&CSTS_RDY) break;
         io_wait();
     }
-    if(!(nvme_r32(NVME_CSTS)&CSTS_RDY)){ kprintf("[NVMe] RDY timeout\r\n"); return; }
+    if(!(nvme_r32(NVME_CSTS)&CSTS_RDY)){ print_str("[NVMe] RDY timeout\r\n"); return; }
 
     /* ── 5. Identify controller ── */
     {
@@ -224,12 +224,12 @@ void nvme_init(u64 bar){
         cmd.prp1 = (u64)(usize)g_nvme.data_buf;
         cmd.prp2 = 0;
         cmd.cdw10= 1; /* CNS=1 → identify controller */
-        if(admin_submit(&cmd)){ kprintf("[NVMe] identify ctrl fail\r\n"); return; }
+        if(admin_submit(&cmd)){ print_str("[NVMe] identify ctrl fail\r\n"); return; }
         /* data_buf[24..63] = model number (ASCII, 40 bytes) */
         char model[41]; memcpy(model, g_nvme.data_buf+24, 40); model[40]='\0';
         /* Trim trailing spaces */
         for(int i=39;i>=0&&model[i]==' ';i--) model[i]='\0';
-        kprintf("[NVMe] ctrl: "); kprintf("%s", model); kprintf("\r\n");
+        print_str("[NVMe] ctrl: "); print_str(model); print_str("\r\n");
     }
 
     /* ── 6. Identify namespace 1 ── */
@@ -240,7 +240,7 @@ void nvme_init(u64 bar){
         cmd.prp1 = (u64)(usize)g_nvme.data_buf;
         cmd.prp2 = 0;
         cmd.cdw10= 0; /* CNS=0 → identify namespace */
-        if(admin_submit(&cmd)){ kprintf("[NVMe] identify ns fail\r\n"); return; }
+        if(admin_submit(&cmd)){ print_str("[NVMe] identify ns fail\r\n"); return; }
         /* NSZE: bytes 0-7 */
         g_nvme.ns_sectors=*(u64*)(g_nvme.data_buf+0);
         /* LBAF: bytes 128+ — current format in FLBAS[3:0] */
@@ -249,15 +249,15 @@ void nvme_init(u64 bar){
         u8  lbads=(u8)((lbaf>>16)&0xFF); /* log2 of block size */
         g_nvme.lba_size=(lbads?1u<<lbads:512u);
         g_nvme.nsid=1;
-        kprintf("[NVMe] ns1: ");
+        print_str("[NVMe] ns1: ");
         print_hex_byte((u8)(g_nvme.ns_sectors>>56)); print_hex_byte((u8)(g_nvme.ns_sectors>>48));
         print_hex_byte((u8)(g_nvme.ns_sectors>>40)); print_hex_byte((u8)(g_nvme.ns_sectors>>32));
         print_hex_byte((u8)(g_nvme.ns_sectors>>24)); print_hex_byte((u8)(g_nvme.ns_sectors>>16));
         print_hex_byte((u8)(g_nvme.ns_sectors>>8));  print_hex_byte((u8)g_nvme.ns_sectors);
-        kprintf(" sectors, lba=");
+        print_str(" sectors, lba=");
         print_hex_byte((u8)(g_nvme.lba_size>>24)); print_hex_byte((u8)(g_nvme.lba_size>>16));
         print_hex_byte((u8)(g_nvme.lba_size>>8));  print_hex_byte((u8)g_nvme.lba_size);
-        kprintf("\r\n");
+        print_str("\r\n");
     }
 
     /* ── 7. Create I/O completion queue (admin cmd 0x05) ── */
@@ -265,7 +265,7 @@ void nvme_init(u64 bar){
     ioq->depth=NVME_IO_Q_DEPTH;
     ioq->sq=(NvmeSqe*)alloc_aligned(sizeof(NvmeSqe)*NVME_IO_Q_DEPTH,4096);
     ioq->cq=(NvmeCqe*)alloc_aligned(sizeof(NvmeCqe)*NVME_IO_Q_DEPTH,4096);
-    if(!ioq->sq||!ioq->cq){ kprintf("[NVMe] ioq alloc fail\r\n"); return; }
+    if(!ioq->sq||!ioq->cq){ print_str("[NVMe] ioq alloc fail\r\n"); return; }
     memset(ioq->sq,0,sizeof(NvmeSqe)*NVME_IO_Q_DEPTH);
     memset(ioq->cq,0,sizeof(NvmeCqe)*NVME_IO_Q_DEPTH);
     ioq->sq_tail=0; ioq->cq_head=0; ioq->cq_phase=1; ioq->next_cid=0;
@@ -279,7 +279,7 @@ void nvme_init(u64 bar){
         cmd.prp1 = (u64)(usize)ioq->cq;
         cmd.cdw10= ((u32)(NVME_IO_Q_DEPTH-1)<<16)|1; /* QSIZE | QID=1 */
         cmd.cdw11= 1; /* PC=1 physically contiguous */
-        if(admin_submit(&cmd)){ kprintf("[NVMe] create IOCQ fail\r\n"); return; }
+        if(admin_submit(&cmd)){ print_str("[NVMe] create IOCQ fail\r\n"); return; }
     }
     {   /* Create I/O SQ */
         NvmeSqe cmd; memset(&cmd,0,sizeof(cmd));
@@ -287,11 +287,11 @@ void nvme_init(u64 bar){
         cmd.prp1 = (u64)(usize)ioq->sq;
         cmd.cdw10= ((u32)(NVME_IO_Q_DEPTH-1)<<16)|1; /* QSIZE | QID=1 */
         cmd.cdw11= (1u<<16)|1; /* CQID=1 | PC=1 */
-        if(admin_submit(&cmd)){ kprintf("[NVMe] create IOSQ fail\r\n"); return; }
+        if(admin_submit(&cmd)){ print_str("[NVMe] create IOSQ fail\r\n"); return; }
     }
 
     g_nvme.ready=1;
-    kprintf("[NVMe] ready\r\n");
+    print_str("[NVMe] ready\r\n");
 }
 
 /* ── Submit I/O command (read or write) ──────────────────────── */

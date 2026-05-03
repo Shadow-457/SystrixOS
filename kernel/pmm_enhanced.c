@@ -174,7 +174,9 @@ void pmm_print_stats(void) {
     PmmStats s;
     pmm_get_stats(&s);
 
-    kprintf("\n=== PMM Memory Statistics ===\r\n"
+    { char buf[256];
+      ksnprintf(buf, sizeof(buf),
+                "\n=== PMM Memory Statistics ===\r\n"
                 "Total allocations:            %llu\r\n"
                 "Total frees:                  %llu\r\n"
                 "Current allocated (pages):    %llu\r\n"
@@ -191,15 +193,18 @@ void pmm_print_stats(void) {
                 (unsigned long long)s.fragmentation_index,
                 (unsigned long long)s.compaction_runs,
                 (unsigned long long)s.pages_compacted);
+      print_str(buf); }
 
-    kprintf("\r\nPer-order allocations:\r\n");
+    print_str("\r\nPer-order allocations:\r\n");
     for (u32 o = 0; o <= MAX_ORDER; o++) {
         if (s.alloc_per_order[o] > 0) {
-            kprintf("  order %u: %llu\r\n",
+            char buf[32];
+            ksnprintf(buf, sizeof(buf), "  order %u: %llu\r\n",
                       o, (unsigned long long)s.alloc_per_order[o]);
+            print_str(buf);
         }
     }
-    kprintf("===========================\r\n");
+    print_str("===========================\r\n");
 }
 
 /* ---- Defragmentation: try to coalesce free pages --------------
@@ -402,7 +407,7 @@ u32 pmm_max_contiguous_order(void) {
 
 /* ---- Dump free list for debugging ----------------------------- */
 void pmm_dump_freelist(void) {
-    kprintf("PMM Free List Dump:\r\n");
+    print_str("PMM Free List Dump:\r\n");
     for (u32 o = 0; o <= MAX_ORDER; o++) {
         u32 count = 0;
         u32 idx = ENH_BUDDY_HEADS[o].next;
@@ -411,8 +416,10 @@ void pmm_dump_freelist(void) {
             idx = page_node(idx)->next;
         }
         if (count > 0) {
-            kprintf("  Order %u: %u blocks (%llu pages)\r\n",
+            char buf[48];
+            ksnprintf(buf, sizeof(buf), "  Order %u: %u blocks (%llu pages)\r\n",
                       o, count, (unsigned long long)count * (1ULL << o));
+            print_str(buf);
         }
     }
 }

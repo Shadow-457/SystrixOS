@@ -105,7 +105,7 @@ i64 elf_load(void *data, usize size, const char *name) {
     }
 
     /* FIX (Bug 5): map user stack pages into the new CR3.
-     * SHC (the Shadow compiler) uses ~97KB of stack, so we map
+     * User programs may use ~97KB of stack, so we map
      * 32 pages (128KB) below PROC_STACK_TOP to be safe. */
     {
         u64 phys;

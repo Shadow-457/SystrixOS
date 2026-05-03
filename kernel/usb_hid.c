@@ -160,7 +160,7 @@ static void db_ring(Xhci*x,u32 slot,u32 ep){
 }
 
 /* ── DMA allocator (heap = identity mapped, virt == phys) ─────── */
-static void *dma_alloc(usize sz,usize align,u64 *phys_out){
+static void *xhci_dma_alloc(usize sz,usize align,u64 *phys_out){
     usize raw=(usize)heap_malloc(sz+align-1);
     if(!raw){if(phys_out)*phys_out=0;return 0;}
     usize p=(raw+align-1)&~(align-1);
@@ -258,7 +258,7 @@ static void xhci_poll_one(Xhci *x){
             u8 *buf=(u8*)(usize)in_trb->param;
             if(x->hid_type==0) decode_kbd(buf,x->hid_prev);
             else               decode_mouse(buf,x->hid_prev);
-            memcpy(x->hid_prev, buf, 8);
+            for(int i=0;i<8;i++) x->hid_prev[i]=buf[i];
             /* Re-arm */
             in_trb->status=8;
             in_trb->ctrl=TRB_TYPE(TRB_NORMAL)|TRB_CYCLE|TRB_IOC|(u32)(x->hid_pcs);
@@ -340,15 +340,15 @@ void usb_hid_init(void){
                 x->n_slots=(*(volatile u32*)(x->mmio+XHCI_HCSPARAMS1))&0xFF;
                 x->n_ports=(*(volatile u32*)(x->mmio+XHCI_HCSPARAMS1))>>24;
 
-                if(xhci_reset(x)) { kprintf("[XHCI] reset fail\r\n"); continue; }
+                if(xhci_reset(x)) { print_str("[XHCI] reset fail\r\n"); continue; }
 
                 /* Allocate DCBAA */
-                x->dcbaa=(u64*)dma_alloc((x->n_slots+1)*8,64,&x->dcbaa_phys);
+                x->dcbaa=(u64*)xhci_dma_alloc((x->n_slots+1)*8,64,&x->dcbaa_phys);
                 if(!x->dcbaa) continue;
                 ow64(x,XHCI_DCBAAP,x->dcbaa_phys);
 
                 /* Allocate command ring */
-                x->cmd_ring=(Trb*)dma_alloc(RING_SZ*16,64,&x->cmd_ring_phys);
+                x->cmd_ring=(Trb*)xhci_dma_alloc(RING_SZ*16,64,&x->cmd_ring_phys);
                 if(!x->cmd_ring) continue;
                 /* Link TRB at end of ring */
                 x->cmd_ring[RING_SZ-1].param=x->cmd_ring_phys;
@@ -358,8 +358,8 @@ void usb_hid_init(void){
                 ow64(x,XHCI_CRCR,x->cmd_ring_phys|1u);
 
                 /* Allocate event ring segment table + ring */
-                x->evt_ring=(Trb*)dma_alloc(RING_SZ*16,64,&x->evt_ring_phys);
-                x->erst    =(u64*)dma_alloc(2*sizeof(u64)*2,64,&x->erst_phys);
+                x->evt_ring=(Trb*)xhci_dma_alloc(RING_SZ*16,64,&x->evt_ring_phys);
+                x->erst    =(u64*)xhci_dma_alloc(2*sizeof(u64)*2,64,&x->erst_phys);
                 if(!x->evt_ring||!x->erst) continue;
                 x->erst[0]=x->evt_ring_phys;
                 x->erst[1]=(u64)RING_SZ;
@@ -385,7 +385,7 @@ void usb_hid_init(void){
                 x->active=1;
                 g_n_xhci++;
 
-                kprintf("[XHCI] init OK ");print_hex_byte((u8)x->n_ports);kprintf(" ports\r\n");
+                print_str("[XHCI] init OK ");print_hex_byte((u8)x->n_ports);print_str(" ports\r\n");
             }
             /* UHCI/OHCI/EHCI: BIOS legacy PS/2 emulation — no action needed */
         }
