@@ -204,15 +204,15 @@ void ipc_init(void) {
 
 /* ── debug helper: dump server registry (callable from shell) ──── */
 void ipc_dump_servers(void) {
-    kprintf("[IPC] registered servers:\n");
+    print_str("[IPC] registered servers:\n");
     int found = 0;
     for (int i = 0; i < IPC_SERVER_MAX; i++) {
         if (g_servers[i].active) {
-            kprintf("  ");
-            kprintf("%s", g_servers[i].name);
-            kprintf("\n");
+            print_str("  ");
+            print_str(g_servers[i].name);
+            print_str("\n");
             found++;
         }
     }
-    if (!found) kprintf("  (none)\n");
+    if (!found) print_str("  (none)\n");
 }

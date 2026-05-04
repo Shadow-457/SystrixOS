@@ -157,9 +157,9 @@ static i64 path_walk(vfs_inode_t *start, const char *path, vfs_inode_t *out) {
     if (!start || !start->valid || !start->ops->lookup) return (i64)ENOENT;
     if (!path || !*path) { *out = *start; return 0; }
     char tmp[MAX_PATH];
-    /* strlcpy returns source length; if >= sizeof(tmp) the path was truncated */
-    if (strlcpy(tmp, path, sizeof(tmp)) >= sizeof(tmp))
-        return (i64)ENAMETOOLONG;
+    usize len = strlen(path);
+    if (len >= MAX_PATH) return (i64)ENAMETOOLONG;
+    memcpy(tmp, path, len + 1);
     vfs_inode_t cur = *start;
     char *p = tmp;
     while (*p) {
@@ -168,7 +168,7 @@ static i64 path_walk(vfs_inode_t *start, const char *path, vfs_inode_t *out) {
         char *slash = p;
         while (*slash && *slash != '/') slash++;
         char saved = *slash;
-        *slash = '\0';
+        *slash = 0;
         vfs_inode_t next;
         i64 r = cur.ops->lookup(&cur, p, &next);
         *slash = saved;
@@ -299,12 +299,14 @@ i64 vfs_mkdir(const char *path, u16 mode) {
     vfs_mount_t *mnt = find_mount(path, &rel);
     if (!mnt) return (i64)ENOENT;
     char tmp[MAX_PATH];
-    if (strlcpy(tmp, rel, sizeof(tmp)) >= sizeof(tmp)) return (i64)ENAMETOOLONG;
-    /* strrchr finds the last '/' so we can split parent dir from base name */
-    char *last_slash = strrchr(tmp, '/');
+    usize len = strlen(rel);
+    if (len >= MAX_PATH) return (i64)ENAMETOOLONG;
+    memcpy(tmp, rel, len + 1);
+    char *last_slash = NULL;
+    for (char *p = tmp; *p; p++) { if (*p == '/') last_slash = p; }
     vfs_inode_t parent;
     if (last_slash) {
-        *last_slash = '\0';
+        *last_slash = 0;
         i64 r = path_walk(&mnt->root, tmp, &parent);
         if (r < 0) return r;
         return parent.ops->mkdir(&parent, last_slash + 1, mode);
@@ -317,11 +319,14 @@ i64 vfs_unlink(const char *path) {
     vfs_mount_t *mnt = find_mount(path, &rel);
     if (!mnt) return (i64)ENOENT;
     char tmp[MAX_PATH];
-    if (strlcpy(tmp, rel, sizeof(tmp)) >= sizeof(tmp)) return (i64)ENAMETOOLONG;
-    char *last_slash = strrchr(tmp, '/');
+    usize len = strlen(rel);
+    if (len >= MAX_PATH) return (i64)ENAMETOOLONG;
+    memcpy(tmp, rel, len + 1);
+    char *last_slash = NULL;
+    for (char *p = tmp; *p; p++) { if (*p == '/') last_slash = p; }
     vfs_inode_t parent;
     if (last_slash) {
-        *last_slash = '\0';
+        *last_slash = 0;
         i64 r = path_walk(&mnt->root, tmp, &parent);
         if (r < 0) return r;
         return parent.ops->unlink(&parent, last_slash + 1);
@@ -334,12 +339,13 @@ i64 vfs_create(const char *path, u16 mode) {
     vfs_mount_t *mnt = find_mount(path, &rel);
     if (!mnt) return (i64)ENOENT;
     char tmp[MAX_PATH];
-    if (strlcpy(tmp, rel, sizeof(tmp)) >= sizeof(tmp)) return (i64)ENAMETOOLONG;
-    /* strrchr gives us the last slash cleanly without a manual loop */
-    char *last_slash = strrchr(tmp, '/');
+    usize len = strlen(rel);
+    if (len >= MAX_PATH) return (i64)ENAMETOOLONG;
+    memcpy(tmp, rel, len + 1);
+    char *last_slash = NULL;
+    for (char *p = tmp; *p; p++) { if (*p == '/') last_slash = p; }
     vfs_inode_t parent;
     if (last_slash) {
-        *last_slash = '\0';
         *last_slash = 0;
         i64 r = path_walk(&mnt->root, tmp, &parent);
         if (r < 0) return r;
@@ -407,7 +413,7 @@ i64 sys_dup2(u64 oldfd, u64 newfd) {
 }
 
 static u64 get_time_ms(void) {
-
+    extern u64 pit_ticks;
     return pit_ticks;
 }
 

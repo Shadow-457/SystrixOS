@@ -127,7 +127,7 @@ void uefi_init(void *systab_ptr) {
         return;
     }
     efi_boot_svc = (efi_boot_services_t*)efi_systab->boot;
-    kprintf("[UEFI] System table found at: ");
+    print_str("[UEFI] System table found at: ");
     print_hex_byte((u8)((u64)efi_systab >> 56));
     print_hex_byte((u8)((u64)efi_systab >> 48));
     print_hex_byte((u8)((u64)efi_systab >> 40));
@@ -136,12 +136,12 @@ void uefi_init(void *systab_ptr) {
     print_hex_byte((u8)((u64)efi_systab >> 16));
     print_hex_byte((u8)((u64)efi_systab >> 8));
     print_hex_byte((u8)(u64)efi_systab);
-    kprintf("\r\n");
+    print_str("\r\n");
 }
 
 void uefi_get_memory_map(void) {
     if (!efi_boot_svc) return;
-    kprintf("[UEFI] Getting memory map...\r\n");
+    print_str("[UEFI] Getting memory map...\r\n");
 }
 
 void uefi_map_kernel(void) {
@@ -168,12 +168,12 @@ void uefi_map_kernel(void) {
             }
         }
     }
-    kprintf("[UEFI] Memory map applied\r\n");
+    print_str("[UEFI] Memory map applied\r\n");
 }
 
 void uefi_exit_boot_services(void) {
     if (!efi_boot_svc) return;
-    kprintf("[UEFI] Exiting boot services...\r\n");
+    print_str("[UEFI] Exiting boot services...\r\n");
 }
 
 u64 uefi_allocate_pages(usize pages) {

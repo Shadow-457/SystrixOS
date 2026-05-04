@@ -39,17 +39,18 @@ void pkg_add(const char *name, const char *desc, const char *url, u32 size) {
 }
 
 void pkg_list(void) {
-    kprintf("Available packages:\r\nNAME            SIZE    INSTALLED  DESCRIPTION\r\n");
+    print_str("Available packages:\r\n");
+    print_str("NAME            SIZE    INSTALLED  DESCRIPTION\r\n");
     for (int i = 0; i < pkg_count; i++) {
-        kprintf("%s", packages[i].name);
-        for (int j = strlen(packages[i].name); j < 16; j++) kprintf(" ");
+        print_str(packages[i].name);
+        for (int j = strlen(packages[i].name); j < 16; j++) print_str(" ");
         print_hex_byte((u8)(packages[i].size >> 8));
         print_hex_byte((u8)packages[i].size);
-        kprintf("   ");
-        kprintf("%s", packages[i].installed ? "YES" : "NO ");
-        kprintf("   ");
-        kprintf("%s", packages[i].desc);
-        kprintf("\r\n");
+        print_str("   ");
+        print_str(packages[i].installed ? "YES" : "NO ");
+        print_str("   ");
+        print_str(packages[i].desc);
+        print_str("\r\n");
     }
 }
 
@@ -57,18 +58,19 @@ i64 pkg_install(const char *name) {
     for (int i = 0; i < pkg_count; i++) {
         if (strcmp(packages[i].name, name) == 0) {
             if (packages[i].installed) {
-                kprintf("Package already installed\r\n");
+                print_str("Package already installed\r\n");
                 return 0;
             }
-            kprintf("Downloading: ");
-            kprintf("%s", packages[i].url);
-            kprintf("\r\nSize: ");
+            print_str("Downloading: ");
+            print_str(packages[i].url);
+            print_str("\r\n");
+            print_str("Size: ");
             print_hex_byte((u8)(packages[i].size >> 8));
             print_hex_byte((u8)packages[i].size);
-            kprintf(" bytes\r\n");
+            print_str(" bytes\r\n");
             u32 ip = net_dns_resolve("packages.systrixos.org");
             if (ip == 0) {
-                kprintf("DNS resolution failed\r\n");
+                print_str("DNS resolution failed\r\n");
                 return (i64)ENETUNREACH;
             }
             int sock = (int)sys_socket(2, 1, 0);
@@ -103,18 +105,18 @@ i64 pkg_install(const char *name) {
             }
             sys_close_socket(sock);
             packages[i].installed = 1;
-            kprintf("Installed: ");
-            kprintf("%s", name);
-            kprintf(" (");
+            print_str("Installed: ");
+            print_str(name);
+            print_str(" (");
             print_hex_byte((u8)(total >> 8));
             print_hex_byte((u8)total);
-            kprintf(" bytes)\r\n");
+            print_str(" bytes)\r\n");
             return 0;
         }
     }
-    kprintf("Package not found: ");
-    kprintf("%s", name);
-    kprintf("\r\n");
+    print_str("Package not found: ");
+    print_str(name);
+    print_str("\r\n");
     return (i64)ENOENT;
 }
 
@@ -122,13 +124,13 @@ i64 pkg_remove(const char *name) {
     for (int i = 0; i < pkg_count; i++) {
         if (strcmp(packages[i].name, name) == 0) {
             if (!packages[i].installed) {
-                kprintf("Package not installed\r\n");
+                print_str("Package not installed\r\n");
                 return (i64)ENOENT;
             }
             packages[i].installed = 0;
-            kprintf("Removed: ");
-            kprintf("%s", name);
-            kprintf("\r\n");
+            print_str("Removed: ");
+            print_str(name);
+            print_str("\r\n");
             return 0;
         }
     }

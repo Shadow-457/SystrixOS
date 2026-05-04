@@ -18,73 +18,73 @@
 #define DOCK_PAD     12
 #define ANIM_SPEED   8
 
-#define C_BASE          0x05070a   /* Deep abyss */
-#define C_SURFACE       0x0f141a   /* Card background */
-#define C_ELEVATED      0x1a222c   /* Raised components */
-#define C_ELEVATED2     0x2a3544   /* Hovered/Active components */
-#define C_ACCENT        0x3584e4   /* Adwaita Blue */
-#define C_ACCENT2       0x1c71d8   /* Dark Blue */
-#define C_ACCENT_DIM    0x12365a   /* Muted accent */
-#define C_ACCENT_GLOW   0x62a0ea   /* Vibrant glow */
-#define C_TEXT          0xffffff   /* Pure white */
-#define C_TEXT_DIM      0x9a9996   /* GNOME grey */
-#define C_TEXT_MID      0xc0bfbc   /* Silver */
-#define C_WIN_BG        0x1e1e1e   /* Standard Dark BG */
-#define C_WIN_BORDER    0x303030   /* Muted border */
-#define C_WIN_BORDER_A  0x3584e4   /* Accent border */
-#define C_WIN_BORDER_A2 0x12365a
-#define C_TITLE_A_L     0x242424   /* Active title */
-#define C_TITLE_A_R     0x1e1e1e
-#define C_TITLE_I_L     0x1a1a1a   /* Inactive title */
-#define C_TITLE_I_R     0x161616
-#define C_CLOSE_BTN     0xc01c28   /* GNOME Red */
-#define C_CLOSE_BTN_H   0xe01b24
-#define C_MIN_BTN       0xf5c211   /* Yellow */
-#define C_MIN_BTN_H     0xf8e45c
-#define C_MAX_BTN       0x26a269   /* GNOME Green */
-#define C_MAX_BTN_H     0x2ec27e
-#define C_DOCK_BG       0x000000   /* Translucent black */
-#define C_DOCK_PILL     0x242424
-#define C_DOCK_ICON_BG  0x303030
-#define C_DOCK_ICON_ACT 0x3584e4
-#define C_MENUBAR_BG    0x101010
-#define C_MENUBAR_SEP   0x202020
+#define C_BASE          0x0a0e14
+#define C_SURFACE       0x121a24
+#define C_ELEVATED      0x1a2430
+#define C_ELEVATED2     0x223040
+#define C_ACCENT        0x40a0e0
+#define C_ACCENT2       0x3080c0
+#define C_ACCENT_DIM    0x1a3050
+#define C_ACCENT_GLOW   0x60c0ff
+#define C_TEXT          0xe8eef4
+#define C_TEXT_DIM      0x5a6a7a
+#define C_TEXT_MID      0x8a9aaa
+#define C_WIN_BG        0x121a24
+#define C_WIN_BORDER    0x2a3a4a
+#define C_WIN_BORDER_A  0x40a0e0
+#define C_WIN_BORDER_A2 0x1a3050
+#define C_TITLE_A_L     0x1a2a3a
+#define C_TITLE_A_R     0x101a24
+#define C_TITLE_I_L     0x141c26
+#define C_TITLE_I_R     0x121a24
+#define C_CLOSE_BTN     0xe05050
+#define C_CLOSE_BTN_H   0xff6060
+#define C_MIN_BTN       0xe0a030
+#define C_MIN_BTN_H     0xffc040
+#define C_MAX_BTN       0x40b870
+#define C_MAX_BTN_H     0x50d080
+#define C_DOCK_BG       0x0a0e14
+#define C_DOCK_PILL     0x162030
+#define C_DOCK_ICON_BG  0x1a2838
+#define C_DOCK_ICON_ACT 0x1a3050
+#define C_MENUBAR_BG    0x0a0e14
+#define C_MENUBAR_SEP   0x1a2a3a
 #define C_SHADOW        0x000000
-#define C_PROGRESS_FG   0x3584e4
-#define C_PROGRESS_FG2  0x1c71d8
-#define C_PROGRESS_BG   0x2a2a2a
-#define C_SEP_LINE      0x303030
-#define C_BTN_BG        0x303030
-#define C_BTN_BORDER    0x3a3a3a
-#define C_BTN_TOP       0x404040
-#define C_BTN_HL        0x404040
+#define C_PROGRESS_FG   0x40a0e0
+#define C_PROGRESS_FG2  0x3080c0
+#define C_PROGRESS_BG   0x1a2838
+#define C_SEP_LINE      0x2a3a4a
+#define C_BTN_BG        0x1a2838
+#define C_BTN_BORDER    0x2a3a4a
+#define C_BTN_TOP       0x40a0e0
+#define C_BTN_HL        0x283848
 #define C_MODAL_DIM     0x000000
-#define C_CHECKBOX_BOX  0x303030
-#define C_CHECKBOX_CHK  0x3584e4
-#define C_TEXTINPUT_BG  0x121212
-#define C_TEXTINPUT_BRD 0x303030
-#define C_ICON_BG       0x242424
-#define C_SHELL_PROMPT  0x3584e4
-#define C_SHELL_CMD     0xffffff
-#define C_SHELL_OUT     0xc0bfbc
-#define C_LAUNCHER_BG   0x1e1e1e
-#define C_LAUNCHER_HOVER 0x303030
-#define C_LAUNCHER_ACTIVE 0x3584e4
-#define C_TRAY_BG     0x101010
-#define C_TRAY_ICON   0x9a9996
-#define C_CTX_MENU_BG 0x242424
-#define C_CTX_MENU_BORDER 0x3a3a3a
-#define C_CTX_MENU_HOVER 0x303030
-#define C_DESKTOP_ICON_BG 0x242424
-#define C_DESKTOP_ICON_SEL 0x3584e4
-#define C_NET_ON      0x26a269
-#define C_NET_OFF     0xc01c28
-#define C_VOL_HIGH    0x3584e4
-#define C_VOL_MED     0xe66100
-#define C_VOL_LOW     0xc01c28
+#define C_CHECKBOX_BOX  0x2a3a4a
+#define C_CHECKBOX_CHK  0x40a0e0
+#define C_TEXTINPUT_BG  0x0a0e14
+#define C_TEXTINPUT_BRD 0x2a3a4a
+#define C_ICON_BG       0x1a2a3a
+#define C_SHELL_PROMPT  0x40a0e0
+#define C_SHELL_CMD     0xe8eef4
+#define C_SHELL_OUT     0x8a9aaa
+#define C_LAUNCHER_BG   0x0a0e14
+#define C_LAUNCHER_HOVER 0x1a2838
+#define C_LAUNCHER_ACTIVE 0x1a3050
+#define C_TRAY_BG     0x0a0e14
+#define C_TRAY_ICON   0x8a9aaa
+#define C_CTX_MENU_BG 0x121a24
+#define C_CTX_MENU_BORDER 0x2a3a4a
+#define C_CTX_MENU_HOVER 0x1a2838
+#define C_DESKTOP_ICON_BG 0x1a2a3a
+#define C_DESKTOP_ICON_SEL 0x40a0e0
+#define C_NET_ON      0x40b870
+#define C_NET_OFF     0xe05050
+#define C_VOL_HIGH    0x40a0e0
+#define C_VOL_MED     0xe0a030
+#define C_VOL_LOW     0xe05050
 #define C_WALL_TOP    0x0a0e14
-#define C_WALL_BOT    0x05070a
-#define C_WALL_ACCENT 0x1a222c
+#define C_WALL_BOT    0x080c12
+#define C_WALL_ACCENT 0x0e1a28
 
 typedef enum {
     WT_NONE=0, WT_LABEL, WT_LABEL_DIM, WT_BUTTON, WT_CHECKBOX,
@@ -146,8 +146,6 @@ typedef struct {
     WindowAnimState anim_state;
     int anim_progress;
     int fade_alpha;
-    u32 *pixbuf;             /* Window's private off-screen buffer */
-    int dirty;               /* 1 = needs re-render to pixbuf */
 } GuiWindow;
 
 #define GUI_MAX_WINDOWS  12
@@ -164,9 +162,7 @@ static int g_clicked_widget=-1;
 static int g_resizing=0, g_resize_win=-1, g_resize_dir=0;
 static int g_resize_start_x=0, g_resize_start_y=0;
 static int g_resize_start_w=0, g_resize_start_h=0, g_resize_start_ox=0, g_resize_start_oy=0;
-static int g_cur_x=512, g_cur_y=384;
-static int g_cur_x_old=512, g_cur_y_old=384;
-static int g_cursor_type = 0;
+static int g_prev_drag_x=-1, g_prev_drag_y=-1, g_prev_drag_w=0, g_prev_drag_h=0;
 
 static int  g_shell_win_id=-1;
 static char g_shell_buf[512];
@@ -185,10 +181,10 @@ static int g_clock_ticks = 0;
 static int g_clock_sec = 0;
 static int g_clock_min = 0;
 static int g_clock_hour = 0;
-static int g_desktop_dirty = 1;
-static int g_dock_dirty = 1;
-static u32 *g_desktop_cache = 0;
-static int g_dmg_x=0, g_dmg_y=0, g_dmg_w=0, g_dmg_h=0;
+static int g_dirty = 0;           /* 1 = full redraw needed next frame */
+static u64 g_last_drag_redraw = 0;   /* pit_ticks of last drag repaint */
+static int g_desktop_dirty = 1;      /* skip desktop repaint when clean */
+static int g_dock_dirty = 1;         /* skip dock repaint when clean */
 
 #define DOCK_BTN_MAX  10
 typedef struct { int x, y, w, h; int action; int hover; } DockBtn;
@@ -197,79 +193,79 @@ static int     g_dock_btn_cnt = 0;
 
 static int g_last_click_time = 0;
 static int g_last_click_icon = -1;
+static int g_hover_win = -1;
+static int g_hover_widget = -1;
 
 static void draw_app_icon(int ix,int iy,int sz,int icon_type,int active);
 static void draw_window(int id);
 static void draw_dock(void);
+static void draw_desktop(void);
 static void draw_desktop_icons(void);
 static void draw_context_menu(void);
 static void draw_app_launcher(void);
 static void draw_system_tray(void);
 static void gui_redraw_window(int id);
 void gui_open_about(void);
+static void gui_redraw_drag(int id);
 static int gui_widget_add_label_dim(int wid,int x,int y,const char*text,int id);
 static void draw_text_clip(int x,int y,const char*s,u32 fg,int tbg,u32 bg,int max_x);
 static u32 lerp_color(u32 a,u32 b,int x,int w);
 static int gui_animate(void);
-static void gui_add_damage(int x, int y, int w, int h);
-void gui_handle_mouse_down(int px, int py);
-void gui_handle_mouse_up(int px, int py);
-static void open_file_manager(void);
-static void open_settings_window(void);
 
+static int g_cur_x=512, g_cur_y=384;  /* updated to screen center on gui_init */
 #define CURSOR_W 14
 #define CURSOR_H 22
 static u32 g_cur_saved[CURSOR_W*CURSOR_H];
 static int g_cur_drawn=0;
-static int g_cur_drawn_x=0, g_cur_drawn_y=0; /* position at which cursor was last drawn */
-/* Pro-Grade Modern Cursor (White fill, Black outline) */
+static int g_cursor_type = 0;
+
 static const u8 cursor_arrow[CURSOR_H][CURSOR_W]={
-    {1,1,0,0,0,0,0,0,0,0,0,0,0,0}, {1,3,1,0,0,0,0,0,0,0,0,0,0,0},
-    {1,3,3,1,0,0,0,0,0,0,0,0,0,0}, {1,3,3,3,1,0,0,0,0,0,0,0,0,0},
-    {1,3,3,3,3,1,0,0,0,0,0,0,0,0}, {1,3,3,3,3,3,1,0,0,0,0,0,0,0},
-    {1,3,3,3,3,3,3,1,0,0,0,0,0,0}, {1,3,3,3,3,3,3,3,1,0,0,0,0,0},
-    {1,3,3,3,3,3,3,3,3,1,0,0,0,0}, {1,3,3,3,3,3,1,1,1,1,0,0,0,0},
-    {1,3,3,3,1,3,3,1,0,0,0,0,0,0}, {1,3,3,1,0,1,3,3,1,0,0,0,0,0},
-    {1,3,1,0,0,0,1,3,3,1,0,0,0,0}, {1,1,0,0,0,0,0,1,3,1,0,0,0,0},
-    {0,0,0,0,0,0,0,0,1,1,0,0,0,0}, {0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {1,0,0,0,0,0,0,0,0,0,0,0,0,0},{1,1,0,0,0,0,0,0,0,0,0,0,0,0},
+    {1,2,1,0,0,0,0,0,0,0,0,0,0,0},{1,2,2,1,0,0,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0,0,0},{1,2,2,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,2,2,1,0,0,0,0,0,0,0},{1,2,2,2,2,2,2,1,0,0,0,0,0,0},
+    {1,2,2,2,2,2,2,2,1,0,0,0,0,0},{1,2,2,2,2,2,2,2,2,1,0,0,0,0},
+    {1,2,2,2,2,2,2,2,2,2,1,0,0,0},{1,2,2,2,2,2,2,2,2,2,2,1,0,0},
+    {1,2,2,2,2,2,2,1,1,1,1,1,0,0},{1,2,2,2,1,2,2,1,0,0,0,0,0,0},
+    {1,2,2,1,0,1,2,2,1,0,0,0,0,0},{1,2,1,0,0,0,1,2,2,1,0,0,0,0},
+    {1,1,0,0,0,0,0,1,2,2,1,0,0,0},{0,0,0,0,0,0,0,1,2,2,1,0,0,0},
+    {0,0,0,0,0,0,0,0,1,2,2,1,0,0},{0,0,0,0,0,0,0,0,1,2,2,1,0,0},
+    {0,0,0,0,0,0,0,0,0,1,1,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0},
 };
+
 static const u8 cursor_resize_h[CURSOR_H][CURSOR_W]={
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
-    {0,0,0,0,1,3,3,3,3,1,0,0,0,0},{0,0,0,1,3,3,3,3,3,3,1,0,0,0},
-    {0,0,1,3,3,3,3,3,3,3,3,1,0,0},{0,1,3,3,3,3,3,3,3,3,3,3,1,0},
-    {1,3,3,3,3,3,3,3,3,3,3,3,3,1},{0,1,3,3,3,3,3,3,3,3,3,3,1,0},
-    {0,0,1,3,3,3,3,3,3,3,3,1,0,0},{0,0,0,1,3,3,3,3,3,3,1,0,0,0},
-    {0,0,0,0,1,3,3,3,3,1,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,1,2,2,2,2,1,0,0,0,0},{0,0,0,1,2,2,2,2,2,2,1,0,0,0},
+    {0,0,1,2,2,2,2,2,2,2,2,1,0,0},{0,1,2,2,2,2,2,2,2,2,2,2,1,0},
+    {1,2,2,2,2,2,2,2,2,2,2,2,2,1},{0,1,2,2,2,2,2,2,2,2,2,2,1,0},
+    {0,0,1,2,2,2,2,2,2,2,2,1,0,0},{0,0,0,1,2,2,2,2,2,2,1,0,0,0},
+    {0,0,0,0,1,2,2,2,2,1,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0},
 };
+
 static const u8 cursor_resize_v[CURSOR_H][CURSOR_W]={
-    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,1,3,3,3,3,1,0,0,0,0},
-    {0,0,0,1,3,3,3,3,3,3,1,0,0,0},{0,0,1,3,3,3,3,3,3,3,3,1,0,0},
-    {0,1,3,3,3,3,3,3,3,3,3,3,1,0},{1,3,3,3,3,3,3,3,3,3,3,3,3,1},
-    {0,0,0,0,0,1,3,3,1,0,0,0,0,0},{0,0,0,0,0,1,3,3,1,0,0,0,0,0},
-    {0,0,0,0,0,1,3,3,1,0,0,0,0,0},{0,0,0,0,0,1,3,3,1,0,0,0,0,0},
-    {0,0,0,0,0,1,3,3,1,0,0,0,0,0},{0,0,0,0,0,1,3,3,1,0,0,0,0,0},
-    {0,0,0,0,0,1,3,3,1,0,0,0,0,0},{0,0,0,0,0,1,3,3,1,0,0,0,0,0},
-    {0,0,0,0,0,1,3,3,1,0,0,0,0,0},{0,0,0,0,0,1,3,3,1,0,0,0,0,0},
-    {1,3,3,3,3,3,3,3,3,3,3,3,3,1},{0,1,3,3,3,3,3,3,3,3,3,3,1,0},
-    {0,0,1,3,3,3,3,3,3,3,3,1,0,0},{0,0,0,1,3,3,3,3,3,3,1,0,0,0},
-    {0,0,0,0,1,3,3,3,3,1,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,1,2,2,2,2,1,0,0,0,0},
+    {0,0,0,1,2,2,2,2,2,2,1,0,0,0},{0,0,1,2,2,2,2,2,2,2,2,1,0,0},
+    {0,1,2,2,2,2,2,2,2,2,2,2,1,0},{1,2,2,2,2,2,2,2,2,2,2,2,2,1},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
+    {0,0,0,0,0,1,1,1,1,0,0,0,0,0},{0,0,0,0,0,1,1,1,1,0,0,0,0,0},
 };
 
 static void cursor_erase(void){
     if(!g_cur_drawn)return;
     int i=0;
-    /* Use the saved draw position, NOT the current cursor position.
-       This prevents ghost trails when the cursor moves between draw and erase. */
     for(int r=0;r<CURSOR_H;r++) for(int c=0;c<CURSOR_W;c++,i++){
-        int px=g_cur_drawn_x+c,py=g_cur_drawn_y+r;
+        int px=g_cur_x+c,py=g_cur_y+r;
         if(px>=0&&px<SCR_W&&py>=0&&py<SCR_H) fb_put_pixel(px,py,g_cur_saved[i]);
     }
     g_cur_drawn=0;
@@ -277,57 +273,60 @@ static void cursor_erase(void){
 
 static void cursor_draw(void){
     const u8 (*shape)[CURSOR_W] = cursor_arrow;
-    if(g_cursor_type==1) { shape=cursor_resize_h; }
-    else if(g_cursor_type==2) { shape=cursor_resize_v; }
-    else if(g_cursor_type==3) { shape=cursor_resize_h; }
-
-    /* Record the position we are drawing at so erase can restore the right pixels */
-    g_cur_drawn_x = g_cur_x;
-    g_cur_drawn_y = g_cur_y;
-
+    if(g_cursor_type==1) shape=cursor_resize_h;
+    else if(g_cursor_type==2) shape=cursor_resize_v;
+    else if(g_cursor_type==3) shape=cursor_resize_h;
     int i=0;
     for(int r=0;r<CURSOR_H;r++) for(int c=0;c<CURSOR_W;c++,i++){
-        int px=g_cur_drawn_x+c,py=g_cur_drawn_y+r;
+        int px=g_cur_x+c,py=g_cur_y+r;
         g_cur_saved[i]=(px>=0&&px<SCR_W&&py>=0&&py<SCR_H)?fb_get_pixel(px,py):0;
     }
-
-    for(int r=0;r<CURSOR_H;r++) {
-        for(int c=0;c<CURSOR_W;c++){
-            u8 p=shape[r][c]; 
-            if(!p) continue;
-            int px=g_cur_drawn_x+c, py=g_cur_drawn_y+r;
-            if(px<0||px>=SCR_W||py<0||py>=SCR_H) continue;
-            fb_put_pixel(px,py,p==1?0x000000:0xffffff);
-        }
+    for(int r=0;r<CURSOR_H;r++) for(int c=0;c<CURSOR_W;c++){
+        u8 p=shape[r][c]; if(!p)continue;
+        int px=g_cur_x+c,py=g_cur_y+r;
+        if(px<0||px>=SCR_W||py<0||py>=SCR_H)continue;
+        fb_put_pixel(px,py,p==1?0xffffff:0x000000);
     }
     g_cur_drawn=1;
 }
 
 void gui_cursor_move(int dx,int dy){
     if(!g_running)return;
-    watchdog_pet();
+    /* Erase cursor from its old position */
     cursor_erase();
     g_cur_x+=dx; g_cur_y+=dy;
-    if(g_cur_x<0) { g_cur_x=0; }
-    if(g_cur_x>=SCR_W) { g_cur_x=SCR_W-1; }
-    if(g_cur_y<MENUBAR_H) { g_cur_y=MENUBAR_H; }
-    if(g_cur_y>=SCR_H) { g_cur_y=SCR_H-1; }
-    
+    if(g_cur_x<0)g_cur_x=0; if(g_cur_x>=SCR_W)g_cur_x=SCR_W-1;
+    if(g_cur_y<0)g_cur_y=0; if(g_cur_y>=SCR_H)g_cur_y=SCR_H-1;
+    g_cursor_type=0;
+    if(!g_dragging&&!g_resizing){
+        for(int i=0;i<GUI_MAX_WINDOWS;i++){
+            if(!g_wins[i].visible||g_wins[i].minimized||g_wins[i].maximized)continue;
+            GuiWindow *w=&g_wins[i];
+            int mx=g_cur_x,my=g_cur_y;
+            if(mx>=w->x+w->w-RESIZE_HANDLE&&mx<=w->x+w->w&&my>=w->y+w->h-RESIZE_HANDLE&&my<=w->y+w->h){g_cursor_type=3;break;}
+            if(mx>=w->x-2&&mx<=w->x+w->w+2&&my>=w->y+w->h-RESIZE_HANDLE&&my<=w->y+w->h+2){g_cursor_type=2;break;}
+            if(mx>=w->x+w->w-RESIZE_HANDLE&&mx<=w->x+w->w+2&&my>=w->y-2&&my<=w->y+w->h+2){g_cursor_type=1;break;}
+        }
+        /* No drag: just redraw cursor at new position - no full scene repaint */
+        cursor_draw();
+        return;
+    }
+    /* Dragging/resizing: do the drag redraw (repaints affected region only) */
     if(g_dragging&&g_drag_win>=0){
         GuiWindow *w=&g_wins[g_drag_win];
         int nx=g_cur_x-g_drag_off_x, ny=g_cur_y-g_drag_off_y;
-        if(nx<0) { nx=0; }
-        if(ny<MENUBAR_H) { ny=MENUBAR_H; }
+        if(nx<0)nx=0; if(ny<MENUBAR_H)ny=MENUBAR_H;
+        if(nx+w->w>SCR_W)nx=SCR_W-w->w;
+        if(ny+w->h>SCR_H-DOCK_H)ny=SCR_H-DOCK_H-w->h;
         w->x=nx; w->y=ny; w->anim_x=nx; w->anim_y=ny;
-        gui_redraw(); /* Full redraw during drag for stability as requested */
+        gui_redraw_drag(g_drag_win);
     } else if(g_resizing&&g_resize_win>=0){
         GuiWindow *w=&g_wins[g_resize_win];
         int ndx=g_cur_x-g_resize_start_x, ndy=g_cur_y-g_resize_start_y;
         if(g_resize_dir&1){w->x=g_resize_start_ox+ndx;w->w=g_resize_start_w-ndx;w->anim_x=w->x;w->anim_w=w->w;}
         if(g_resize_dir&2)w->h=g_resize_start_h+ndy;
         if(g_resize_dir&4)w->w=g_resize_start_w+ndx;
-        if(w->w<120) { w->w=120; }
-        if(w->h<80) { w->h=80; }
+        if(w->w<120)w->w=120; if(w->h<80)w->h=80;
         w->anim_w=w->w; w->anim_h=w->h;
         gui_redraw();
     }
@@ -369,288 +368,177 @@ static int hit_resize(GuiWindow*w,int px,int py){
     return 0;
 }
 
-/* -----------------------------------------------------------------------
- * Mouse button handling — properly split into mouse_down and mouse_up.
- *
- * mouse_down: starts drags/resizes, records pending widget click.
- * mouse_up:   fires widget actions, stops drags/resizes.
- * gui_handle_click: legacy wrapper — calls mouse_down then mouse_up
- *                   (for callers that only fire on release).
- * ----------------------------------------------------------------------- */
+void gui_handle_click(int px,int py){
+    if(px<0){px=g_cur_x;py=g_cur_y;}
+    if(!g_running)return;
+    if(px>=SCR_W)px=SCR_W-1; if(py>=SCR_H)py=SCR_H-1;
+    if(px<0)px=0; if(py<0)py=0;
 
-/* Clamp coordinates to screen bounds */
-static void clamp_xy(int *px, int *py){
-    if(*px<0)*px=0; if(*px>=SCR_W)*px=SCR_W-1;
-    if(*py<0)*py=0; if(*py>=SCR_H)*py=SCR_H-1;
-}
-
-/* Index of the widget whose mouse-down is pending (fires on mouse-up) */
-static int g_pending_widget = -1;
-static int g_pending_win    = -1;
-
-/* Open a new file-manager window and populate it */
-static void open_file_manager(void){
-    for(int w=0;w<GUI_MAX_WINDOWS;w++) if(g_wins[w].visible&&g_wins[w].title[0]=='F'){gui_window_set_active(w);return;}
-    int fm=gui_window_create(24,48,480,560,"File Manager");
-    if(fm<0)return;
-    int rh=GLYPH_H+8,cy=6;
-    gui_widget_add_icon(fm,4,cy,0,1);gui_widget_add_label(fm,44,cy+6,"Files",10);cy+=rh+4;
-    gui_widget_add_separator(fm,cy,12);cy+=10;
-    gui_widget_add_listrow(fm,0,cy,456,"README.TXT","27 B",20);cy+=rh;
-    gui_widget_add_listrow(fm,0,cy,456,"HELLO.C","8.2 KB",21);cy+=rh;
-    gui_widget_add_listrow(fm,0,cy,456,"MYPROGRAM","64 KB",22);cy+=rh;
-    gui_widget_add_listrow(fm,0,cy,456,"SHC","128 KB",23);cy+=rh;
-    gui_widget_add_listrow(fm,0,cy,456,"FIB.SHA","512 B",24);cy+=rh;
-    gui_widget_add_listrow(fm,0,cy,456,"HELLO.SHA","256 B",25);cy+=rh;
-    gui_widget_add_listrow(fm,0,cy,456,"POSIX_TEST","53 KB",26);cy+=rh;
-    cy+=6;gui_widget_add_separator(fm,cy,27);cy+=10;
-    gui_widget_add_label_dim(fm,6,cy,"7 items  |  42.6 KB free",28);cy+=rh;
-    gui_widget_add_button(fm,6,cy,90,GLYPH_H+10,"Refresh",29);
-    gui_widget_add_button(fm,104,cy,90,GLYPH_H+10,"Delete",30);
-}
-
-static void open_settings_window(void){
-    for(int w=0;w<GUI_MAX_WINDOWS;w++) if(g_wins[w].visible&&g_wins[w].title[0]=='S'){gui_window_set_active(w);return;}
-    int sid=gui_window_create(200,100,440,460,"Settings");
-    if(sid<0)return;
-    int rh=GLYPH_H+8,cy=8;
-    gui_widget_add_icon(sid,8,cy,2,300);gui_widget_add_label(sid,48,cy+6,"System Settings",301);cy+=rh+8;
-    gui_widget_add_separator(sid,cy,302);cy+=10;
-    gui_widget_add_label(sid,8,cy,"Display Options:",303);cy+=rh+4;
-    gui_widget_add_checkbox(sid,8,cy,"Enable shadows",1,304);cy+=rh;
-    gui_widget_add_checkbox(sid,8,cy,"Show grid pattern",1,305);cy+=rh;
-    gui_widget_add_checkbox(sid,8,cy,"Animate windows",1,306);cy+=rh;
-    cy+=8;gui_widget_add_separator(sid,cy,307);cy+=10;
-    gui_widget_add_label(sid,8,cy,"Progress Demo:",308);cy+=rh+4;
-    gui_widget_add_progress(sid,8,cy,410,75,309);cy+=rh+10;
-    gui_widget_add_label_dim(sid,8,cy,"System load: 75%",310);cy+=rh+8;
-    gui_widget_add_separator(sid,cy,311);cy+=10;
-    gui_widget_add_label(sid,8,cy,"Text Input:",312);cy+=rh+4;
-    gui_widget_add_textinput(sid,8,cy,410,"Type here...",313);cy+=rh+10;
-    gui_widget_add_button(sid,8,cy,90,GLYPH_H+10,"Apply",314);
-    gui_widget_add_button(sid,106,cy,90,GLYPH_H+10,"Reset",315);
-    gui_widget_add_button(sid,336,cy,90,GLYPH_H+10,"Close",316);
-}
-
-void gui_handle_mouse_down(int px, int py){
-    if(!g_running) return;
-    clamp_xy(&px,&py);
-    g_pending_widget=-1; g_pending_win=-1;
-
-    /* Dismiss context menu on any click */
     if(g_ctx_menu.visible){
-        if(px>=g_ctx_menu.x&&px<g_ctx_menu.x+g_ctx_menu.w&&
-           py>=g_ctx_menu.y&&py<g_ctx_menu.y+g_ctx_menu.h){
-            /* action fires on mouse_up — just record we're inside */
-            return;
-        }
-        g_ctx_menu.visible=0; gui_redraw(); return;
-    }
-
-    /* Dismiss launcher on click outside */
-    if(g_launcher.visible){
-        if(!(px>=g_launcher.x&&px<g_launcher.x+g_launcher.w&&
-             py>=g_launcher.y&&py<g_launcher.y+g_launcher.h)){
-            g_launcher.visible=0; gui_redraw(); return;
-        }
-        return; /* action fires on mouse_up */
-    }
-
-    /* Dock buttons */
-    for(int i=0;i<g_dock_btn_cnt;i++){
-        if(px>=g_dock_btns[i].x&&px<g_dock_btns[i].x+g_dock_btns[i].w&&
-           py>=g_dock_btns[i].y&&py<g_dock_btns[i].y+g_dock_btns[i].h)
-            return; /* fires on mouse_up */
-    }
-
-    /* Desktop icons — single click selects, double click opens */
-    for(int i=0;i<g_desktop_icon_cnt;i++){
-        DesktopIcon *di=&g_desktop_icons[i];
-        if(px>=di->x&&px<di->x+DESKTOP_ICON_W&&py>=di->y&&py<di->y+DESKTOP_ICON_H)
-            return; /* fires on mouse_up */
-    }
-
-    /* Modal windows — only close button works */
-    for(int i=0;i<GUI_MAX_WINDOWS;i++){
-        if(!g_wins[i].visible||!g_wins[i].modal) continue;
-        if(hit_close(&g_wins[i],px,py)) return;
-        return;
-    }
-
-    /* Normal windows — active first, then others */
-    for(int pass=0;pass<2;pass++){
-        for(int i=0;i<GUI_MAX_WINDOWS;i++){
-            if(!g_wins[i].visible||g_wins[i].modal||g_wins[i].minimized) continue;
-            int ia=(i==g_active);
-            if(pass==0&&!ia) continue;
-            if(pass==1&&ia)  continue;
-            GuiWindow *win=&g_wins[i];
-            /* Use actual (committed) window rect for hit testing */
-            if(px<win->x||px>=win->x+win->w) continue;
-            if(py<win->y||py>=win->y+win->h) continue;
-
-            /* Raise window immediately */
-            if(!ia){ gui_window_set_active(i); gui_redraw(); }
-
-            /* Resize edges */
-            int rd=hit_resize(win,px,py);
-            if(rd){
-                g_resizing=1; g_resize_win=i; g_resize_dir=rd;
-                g_resize_start_x=px; g_resize_start_y=py;
-                g_resize_start_w=win->w; g_resize_start_h=win->h;
-                g_resize_start_ox=win->x; g_resize_start_oy=win->y;
-                return;
-            }
-
-            /* Titlebar buttons — fire immediately on down */
-            if(hit_close(win,px,py)){    gui_window_close(i); return; }
-            if(hit_minimize(win,px,py)){ win->visible=0; win->minimized=1; win->anim_state=WIN_MINIMIZED; g_active=-1; gui_redraw(); return; }
-            if(hit_maximize(win,px,py)){
-                if(!win->maximized){ win->orig_x=win->x; win->orig_y=win->y; win->orig_w=win->w; win->orig_h=win->h; win->anim_state=WIN_MAXIMIZING; win->anim_progress=0; win->maximized=1; }
-                else               { win->x=win->orig_x; win->y=win->orig_y; win->w=win->orig_w; win->h=win->orig_h; win->maximized=0; }
-                gui_redraw(); return;
-            }
-
-            /* Titlebar drag — start immediately */
-            if(hit_titlebar(win,px,py)){
-                g_dragging=1; g_drag_win=i;
-                g_drag_off_x=px-win->x; g_drag_off_y=py-win->y;
-                return;
-            }
-
-            /* Widgets — record pending, highlight on down, fire on up */
-            int cx=win->x+BORDER, cy2=win->y+BORDER+TITLEBAR_H+1;
-            for(int j=0;j<g_wgt_cnt;j++){
-                GuiWidget *wg=&g_wgts[j]; if(wg->win_id!=i) continue;
-                int wx=cx+wg->x, wy=cy2+wg->y;
-                if(px>=wx&&px<wx+wg->w&&py>=wy&&py<wy+wg->h){
-                    if(wg->type==WT_CHECKBOX){
-                        wg->checked=!wg->checked; gui_redraw_window(i); return;
-                    }
-                    if(wg->type==WT_BUTTON){
-                        /* Highlight immediately; action fires on mouse_up */
-                        g_pending_widget=j; g_pending_win=i;
-                        g_clicked_widget=j; gui_redraw_window(i);
-                        return;
-                    }
-                }
-            }
-            return;
-        }
-    }
-}
-
-void gui_handle_mouse_up(int px, int py){
-    if(!g_running) return;
-    clamp_xy(&px,&py);
-
-    /* Fire pending button click */
-    if(g_pending_widget>=0){
-        int j=g_pending_widget, i=g_pending_win;
-        g_pending_widget=-1; g_pending_win=-1;
-        g_clicked_widget=-1;
-        if(i>=0&&i<GUI_MAX_WINDOWS&&g_wins[i].visible){
-            GuiWidget *wg=&g_wgts[j];
-            /* Handle well-known button IDs */
-            if(wg->id==316||wg->id==211){ gui_window_close(i); gui_redraw(); return; } /* Close */
-            if(wg->id==117)             { gui_window_close(i); gui_redraw(); return; } /* Monitor Close */
-            gui_redraw_window(i);
-        }
-        gui_redraw();
-        return;
-    }
-
-    /* Stop drag/resize — actual position update already happened in cursor_move */
-    if(g_dragging){ g_dragging=0; g_drag_win=-1; gui_redraw(); return; }
-    if(g_resizing){ g_resizing=0; g_resize_win=-1; g_resize_dir=0; gui_redraw(); return; }
-
-    /* Context menu item */
-    if(g_ctx_menu.visible){
-        if(px>=g_ctx_menu.x&&px<g_ctx_menu.x+g_ctx_menu.w&&
-           py>=g_ctx_menu.y&&py<g_ctx_menu.y+g_ctx_menu.h){
-            int idx=(py-g_ctx_menu.y-4)/(GLYPH_H+8);
-            g_ctx_menu.visible=0;
+        if(px>=g_ctx_menu.x&&px<g_ctx_menu.x+g_ctx_menu.w&&py>=g_ctx_menu.y&&py<g_ctx_menu.y+g_ctx_menu.h){
+            int item_h=GLYPH_H+8;
+            int idx=(py-g_ctx_menu.y-4)/item_h;
             if(idx>=0&&idx<g_ctx_menu.count){
                 int action=g_ctx_menu.actions[idx];
-                if(action==1) gui_open_shell_window();
-                else if(action==3) gui_open_system_monitor();
+                g_ctx_menu.visible=0;
+                if(action==0){gui_redraw();return;}
+                else if(action==1){gui_open_shell_window();gui_redraw();return;}
+                else if(action==2){gui_redraw();return;}
+                else if(action==3){gui_open_system_monitor();gui_redraw();return;}
             }
-            gui_redraw(); return;
+            gui_redraw();return;
         }
-        g_ctx_menu.visible=0; gui_redraw(); return;
+        g_ctx_menu.visible=0; gui_redraw();
     }
 
-    /* Launcher item */
     if(g_launcher.visible){
-        if(px>=g_launcher.x&&px<g_launcher.x+g_launcher.w&&
-           py>=g_launcher.y&&py<g_launcher.y+g_launcher.h){
-            int idx=(py-g_launcher.y-GLYPH_H-12)/44;
-            g_launcher.visible=0;
+        if(px>=g_launcher.x&&px<g_launcher.x+g_launcher.w&&py>=g_launcher.y&&py<g_launcher.y+g_launcher.h){
+            int item_h=44;
+            int idx=(py-g_launcher.y-GLYPH_H-12)/item_h;
             if(idx>=0&&idx<g_launcher.count){
                 int action=g_launcher.actions[idx];
-                if(action==0)      open_file_manager();
-                else if(action==1) gui_open_shell_window();
-                else if(action==2) open_settings_window();
-                else if(action==3) gui_open_system_monitor();
-                else if(action==4) gui_open_about();
+                g_launcher.visible=0;
+                if(action==0){
+                    for(int i=0;i<GUI_MAX_WINDOWS;i++) if(g_wins[i].visible&&g_wins[i].title[0]=='F'){gui_window_set_active(i);gui_redraw();return;}
+                    int fm=gui_window_create(24,48,480,560,"File Manager");
+                    if(fm>=0){int rh=GLYPH_H+8,cy=6;
+                        gui_widget_add_icon(fm,4,cy,0,1);gui_widget_add_label(fm,44,cy+6,"Files",10);cy+=rh+4;
+                        gui_widget_add_separator(fm,cy,12);cy+=10;
+                        gui_widget_add_listrow(fm,0,cy,456,"README.TXT","27 B",20);cy+=rh;
+                        gui_widget_add_listrow(fm,0,cy,456,"HELLO.C","8.2 KB",21);cy+=rh;
+                        gui_widget_add_listrow(fm,0,cy,456,"MYPROGRAM","64 KB",22);cy+=rh;
+                        gui_widget_add_listrow(fm,0,cy,456,"SHC","128 KB",23);cy+=rh;
+                        gui_widget_add_listrow(fm,0,cy,456,"FIB.SHA","512 B",24);cy+=rh;
+                        gui_widget_add_listrow(fm,0,cy,456,"HELLO.SHA","256 B",25);cy+=rh;
+                        gui_widget_add_listrow(fm,0,cy,456,"POSIX_TEST","53 KB",26);cy+=rh;
+                        cy+=6;gui_widget_add_separator(fm,cy,27);cy+=10;
+                        gui_widget_add_label_dim(fm,6,cy,"7 items  |  42.6 KB free",28);cy+=rh;
+                        gui_widget_add_button(fm,6,cy,90,GLYPH_H+10,"Refresh",29);
+                        gui_widget_add_button(fm,104,cy,90,GLYPH_H+10,"Delete",30);
+                    }
+                    gui_redraw();return;
+                }else if(action==1){gui_open_shell_window();gui_redraw();return;}
+                else if(action==2){gui_redraw();return;}
+                else if(action==3){gui_open_system_monitor();gui_redraw();return;}
+                else if(action==4){gui_open_about();gui_redraw();return;}
             }
-            gui_redraw(); return;
+            gui_redraw();return;
         }
-        g_launcher.visible=0; gui_redraw(); return;
+        g_launcher.visible=0; gui_redraw();
     }
 
-    /* Dock buttons */
     for(int i=0;i<g_dock_btn_cnt;i++){
-        if(px>=g_dock_btns[i].x&&px<g_dock_btns[i].x+g_dock_btns[i].w&&
-           py>=g_dock_btns[i].y&&py<g_dock_btns[i].y+g_dock_btns[i].h){
+        if(px>=g_dock_btns[i].x&&px<g_dock_btns[i].x+g_dock_btns[i].w&&py>=g_dock_btns[i].y&&py<g_dock_btns[i].y+g_dock_btns[i].h){
             switch(g_dock_btns[i].action){
-            case 0: g_launcher.visible=!g_launcher.visible;
+            case 0:g_launcher.visible=!g_launcher.visible;
                 if(g_launcher.visible){g_launcher.x=4;g_launcher.y=MENUBAR_H+4;g_launcher.w=220;g_launcher.h=g_launcher.count*44+GLYPH_H+20;g_launcher.anim_progress=0;}
-                break;
-            case 1: open_file_manager(); break;
-            case 2: for(int w=0;w<GUI_MAX_WINDOWS;w++) if(g_wins[w].visible&&g_wins[w].title[0]=='T'){gui_window_set_active(w);g_shell_win_id=w;gui_redraw();return;}
-                    gui_open_shell_window(); break;
-            case 3: open_settings_window(); break;
-            case 4: gui_open_about(); break;
-            case 5: gui_open_shell_window(); break;
-            case 6: gui_open_system_monitor(); break;
+                gui_redraw();return;
+            case 1:for(int w=0;w<GUI_MAX_WINDOWS;w++)if(g_wins[w].visible&&g_wins[w].title[0]=='F'){gui_window_set_active(w);gui_redraw();return;}
+                {int fm=gui_window_create(24,48,480,560,"File Manager");
+                 if(fm>=0){int rh=GLYPH_H+8,cy=6;
+                    gui_widget_add_icon(fm,4,cy,0,1);gui_widget_add_label(fm,44,cy+6,"Files",10);cy+=rh+4;
+                    gui_widget_add_separator(fm,cy,12);cy+=10;
+                    gui_widget_add_listrow(fm,0,cy,456,"README.TXT","27 B",20);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"HELLO.C","8.2 KB",21);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"MYPROGRAM","64 KB",22);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"SHC","128 KB",23);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"FIB.SHA","512 B",24);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"HELLO.SHA","256 B",25);cy+=rh;
+                    gui_widget_add_listrow(fm,0,cy,456,"POSIX_TEST","53 KB",26);cy+=rh;
+                    cy+=6;gui_widget_add_separator(fm,cy,27);cy+=10;
+                    gui_widget_add_label_dim(fm,6,cy,"7 items  |  42.6 KB free",28);cy+=rh;
+                    gui_widget_add_button(fm,6,cy,90,GLYPH_H+10,"Refresh",29);
+                    gui_widget_add_button(fm,104,cy,90,GLYPH_H+10,"Delete",30);
+                 }}
+                gui_redraw();return;
+            case 2:for(int w=0;w<GUI_MAX_WINDOWS;w++)if(g_wins[w].visible&&g_wins[w].title[0]=='T'){gui_window_set_active(w);g_shell_win_id=w;gui_redraw();return;}
+                gui_open_shell_window();gui_redraw();return;
+            case 3:for(int w=0;w<GUI_MAX_WINDOWS;w++)if(g_wins[w].visible&&g_wins[w].title[0]=='S'){gui_window_set_active(w);gui_redraw();return;}
+                {int sid=gui_window_create(200,100,440,460,"Settings");
+                 if(sid>=0){int rh=GLYPH_H+8,cy=8;
+                    gui_widget_add_icon(sid,8,cy,2,300);gui_widget_add_label(sid,48,cy+6,"System Settings",301);cy+=rh+8;
+                    gui_widget_add_separator(sid,cy,302);cy+=10;
+                    gui_widget_add_label(sid,8,cy,"Display Options:",303);cy+=rh+4;
+                    gui_widget_add_checkbox(sid,8,cy,"Enable shadows",1,304);cy+=rh;
+                    gui_widget_add_checkbox(sid,8,cy,"Show grid pattern",1,305);cy+=rh;
+                    gui_widget_add_checkbox(sid,8,cy,"Animate windows",1,306);cy+=rh;
+                    cy+=8;gui_widget_add_separator(sid,cy,307);cy+=10;
+                    gui_widget_add_label(sid,8,cy,"Progress Demo:",308);cy+=rh+4;
+                    gui_widget_add_progress(sid,8,cy,410,75,309);cy+=rh+10;
+                    gui_widget_add_label_dim(sid,8,cy,"System load: 75%",310);cy+=rh+8;
+                    gui_widget_add_separator(sid,cy,311);cy+=10;
+                    gui_widget_add_label(sid,8,cy,"Text Input:",312);cy+=rh+4;
+                    gui_widget_add_textinput(sid,8,cy,410,"Type here...",313);cy+=rh+10;
+                    gui_widget_add_button(sid,8,cy,90,GLYPH_H+10,"Apply",314);
+                    gui_widget_add_button(sid,106,cy,90,GLYPH_H+10,"Reset",315);
+                    gui_widget_add_button(sid,336,cy,90,GLYPH_H+10,"Close",316);
+                 }}
+                gui_redraw();return;
+            case 4:gui_open_about();gui_redraw();return;
+            case 5:gui_open_shell_window();gui_redraw();return;
+            case 6:gui_open_system_monitor();gui_redraw();return;
             }
-            gui_redraw(); return;
         }
     }
 
-    /* Desktop icons */
     for(int i=0;i<g_desktop_icon_cnt;i++){
         DesktopIcon *di=&g_desktop_icons[i];
         if(px>=di->x&&px<di->x+DESKTOP_ICON_W&&py>=di->y&&py<di->y+DESKTOP_ICON_H){
             int ct=g_clock_ticks;
             if(ct-g_last_click_time<50&&g_last_click_icon==i){
-                g_last_click_time=0; g_last_click_icon=-1;
-                if(di->action==0)      gui_open_shell_window();
-                else if(di->action==2) gui_open_system_monitor();
-                else if(di->action==3) gui_open_about();
-                gui_redraw(); return;
+                g_last_click_time=0;g_last_click_icon=-1;
+                if(di->action==0)gui_open_shell_window();
+                else if(di->action==2)gui_open_system_monitor();
+                else if(di->action==3)gui_open_about();
+                gui_redraw();return;
             }
-            g_last_click_time=ct; g_last_click_icon=i;
-            gui_redraw(); return;
+            g_last_click_time=ct;g_last_click_icon=i;
+            return;
+        }
+    }
+
+    for(int i=0;i<GUI_MAX_WINDOWS;i++){
+        if(!g_wins[i].visible||!g_wins[i].modal)continue;
+        if(hit_close(&g_wins[i],px,py)){gui_window_close(i);return;}
+        return;
+    }
+
+    for(int pass=0;pass<2;pass++){
+        for(int i=0;i<GUI_MAX_WINDOWS;i++){
+            if(!g_wins[i].visible||g_wins[i].modal||g_wins[i].minimized)continue;
+            int ia=(i==g_active);
+            if(pass==0&&!ia)continue; if(pass==1&&ia)continue;
+            GuiWindow*win=&g_wins[i];
+            if(px<win->x||px>=win->x+win->w)continue;
+            if(py<win->y||py>=win->y+win->h)continue;
+            int rd=hit_resize(win,px,py);
+            if(rd){g_resizing=1;g_resize_win=i;g_resize_dir=rd;g_resize_start_x=px;g_resize_start_y=py;g_resize_start_w=win->w;g_resize_start_h=win->h;g_resize_start_ox=win->x;g_resize_start_oy=win->y;gui_window_set_active(i);return;}
+            if(hit_close(win,px,py)){gui_window_close(i);return;}
+            if(hit_minimize(win,px,py)){win->visible=0;win->minimized=1;win->anim_state=WIN_MINIMIZED;g_active=-1;gui_redraw();return;}
+            if(hit_maximize(win,px,py)){
+                if(!win->maximized){win->orig_x=win->x;win->orig_y=win->y;win->orig_w=win->w;win->orig_h=win->h;win->anim_state=WIN_MAXIMIZING;win->anim_progress=0;win->maximized=1;}
+                else{win->x=win->orig_x;win->y=win->orig_y;win->w=win->orig_w;win->h=win->orig_h;win->maximized=0;}
+                gui_redraw();return;
+            }
+            if(hit_titlebar(win,px,py)){g_dragging=1;g_drag_win=i;g_drag_off_x=px-win->x;g_drag_off_y=py-win->y;if(!ia){gui_window_set_active(i);gui_redraw();}return;}
+            int cx=win->x+BORDER,cy2=win->y+BORDER+TITLEBAR_H+1;
+            for(int j=0;j<g_wgt_cnt;j++){
+                GuiWidget*wg=&g_wgts[j];if(wg->win_id!=i)continue;
+                int wx=cx+wg->x,wy=cy2+wg->y;
+                if(px>=wx&&px<wx+wg->w&&py>=wy&&py<wy+wg->h){
+                    if(wg->type==WT_CHECKBOX){wg->checked=!wg->checked;gui_redraw_window(i);return;}
+                    if(wg->type==WT_BUTTON){g_clicked_widget=j;gui_redraw_window(i);for(volatile int d=0;d<50000;d++);g_clicked_widget=-1;gui_redraw_window(i);return;}
+                }
+            }
+            if(!ia){gui_window_set_active(i);gui_redraw();}
+            return;
         }
     }
 }
 
-/* Legacy single-event click (PS/2 drivers that fire only on release) */
-void gui_handle_click(int px,int py){
-    if(px<0){px=g_cur_x;py=g_cur_y;}
-    gui_handle_mouse_down(px,py);
-    /* Only fire mouse_up if we didn't start a drag/resize */
-    if(!g_dragging&&!g_resizing) gui_handle_mouse_up(px,py);
-}
-
 void gui_handle_right_click(int px,int py){
     if(!g_running)return;
-    if(px<0) { px=0; }
-    if(py<0) { py=0; }
-    if(px>=SCR_W) { px=SCR_W-1; }
-    if(py>=SCR_H) { py=SCR_H-1; }
+    if(px<0)px=0;if(py<0)py=0;if(px>=SCR_W)px=SCR_W-1;if(py>=SCR_H)py=SCR_H-1;
     if(py>=MENUBAR_H&&py<SCR_H-DOCK_H){
         int ow=0;
         for(int i=0;i<GUI_MAX_WINDOWS;i++){
@@ -664,43 +552,92 @@ void gui_handle_right_click(int px,int py){
             g_ctx_menu.h=g_ctx_menu.count*(GLYPH_H+8)+8;
             if(g_ctx_menu.x+g_ctx_menu.w>SCR_W)g_ctx_menu.x=SCR_W-g_ctx_menu.w;
             if(g_ctx_menu.y+g_ctx_menu.h>SCR_H)g_ctx_menu.y=SCR_H-g_ctx_menu.h;
-            if(g_ctx_menu.x<0) { g_ctx_menu.x=0; }
-            if(g_ctx_menu.y<MENUBAR_H) { g_ctx_menu.y=MENUBAR_H; }
+            if(g_ctx_menu.x<0)g_ctx_menu.x=0;if(g_ctx_menu.y<MENUBAR_H)g_ctx_menu.y=MENUBAR_H;
             gui_redraw();
         }
     }
 }
 
-void gui_stop_drag(void){
-    if(g_dragging){ g_dragging=0; g_drag_win=-1; gui_redraw(); }
-    else { g_dragging=0; g_drag_win=-1; }
+void gui_handle_drag(int px,int py){
+    (void)px;(void)py;/* drag handled in gui_cursor_move */}
+static void gui_handle_drag_old(int px,int py){
+    if(g_dragging&&g_drag_win>=0&&g_drag_win<GUI_MAX_WINDOWS){
+        GuiWindow*win=&g_wins[g_drag_win];
+        if(!win||!win->visible||win->maximized)return;
+        int nx=px-g_drag_off_x,ny=py-g_drag_off_y;
+        if(nx<0)nx=0;if(ny<MENUBAR_H)ny=MENUBAR_H;
+        if(nx+win->w>SCR_W)nx=SCR_W-win->w;if(ny+win->h>SCR_H-DOCK_H)ny=SCR_H-DOCK_H-win->h;
+        win->x=nx;win->y=ny;
+        gui_redraw_drag(g_drag_win);return;
+    }
+    if(g_resizing&&g_resize_win>=0&&g_resize_win<GUI_MAX_WINDOWS){
+        GuiWindow*win=&g_wins[g_resize_win];
+        if(!win||!win->visible||win->maximized)return;
+        int dx=px-g_resize_start_x,dy=py-g_resize_start_y;
+        int nx=g_resize_start_ox,ny=g_resize_start_oy,nw=g_resize_start_w,nh=g_resize_start_h;
+        if(g_resize_dir==1){ny=g_resize_start_oy+dy;nh=g_resize_start_h-dy;if(nh<80){nh=80;ny=g_resize_start_oy+g_resize_start_h-80;}if(ny<MENUBAR_H){ny=MENUBAR_H;nh=g_resize_start_oy+g_resize_start_h-MENUBAR_H;}}
+        else if(g_resize_dir==2){nh=g_resize_start_h+dy;if(nh<80)nh=80;if(nh>SCR_H-MENUBAR_H-DOCK_H)nh=SCR_H-MENUBAR_H-DOCK_H;}
+        else if(g_resize_dir==3){nw=g_resize_start_w+dx;if(nw<120)nw=120;if(nw>SCR_W)nw=SCR_W;}
+        else if(g_resize_dir==4){nx=g_resize_start_ox+dx;nw=g_resize_start_w-dx;if(nw<120){nw=120;nx=g_resize_start_ox+g_resize_start_w-120;}if(nx<0){nx=0;nw=g_resize_start_ox+g_resize_start_w;}}
+        else if(g_resize_dir==5){ny=g_resize_start_oy+dy;nh=g_resize_start_h-dy;nw=g_resize_start_w+dx;if(nh<80){nh=80;ny=g_resize_start_oy+g_resize_start_h-80;}if(ny<MENUBAR_H){ny=MENUBAR_H;nh=g_resize_start_oy+g_resize_start_h-MENUBAR_H;}if(nw<120)nw=120;}
+        else if(g_resize_dir==6){ny=g_resize_start_oy+dy;nh=g_resize_start_h-dy;nx=g_resize_start_ox+dx;nw=g_resize_start_w-dx;if(nh<80){nh=80;ny=g_resize_start_oy+g_resize_start_h-80;}if(ny<MENUBAR_H){ny=MENUBAR_H;nh=g_resize_start_oy+g_resize_start_h-MENUBAR_H;}if(nw<120){nw=120;nx=g_resize_start_ox+g_resize_start_w-120;}if(nx<0){nx=0;nw=g_resize_start_ox+g_resize_start_w;}}
+        else if(g_resize_dir==7){nw=g_resize_start_w+dx;nh=g_resize_start_h+dy;if(nw<120)nw=120;if(nh<80)nh=80;if(nw>SCR_W)nw=SCR_W;if(nh>SCR_H-MENUBAR_H-DOCK_H)nh=SCR_H-MENUBAR_H-DOCK_H;}
+        else if(g_resize_dir==8){nx=g_resize_start_ox+dx;nw=g_resize_start_w-dx;nh=g_resize_start_h+dy;if(nw<120){nw=120;nx=g_resize_start_ox+g_resize_start_w-120;}if(nx<0){nx=0;nw=g_resize_start_ox+g_resize_start_w;}if(nh<80)nh=80;if(nh>SCR_H-MENUBAR_H-DOCK_H)nh=SCR_H-MENUBAR_H-DOCK_H;}
+        win->x=nx;win->y=ny;win->w=nw;win->h=nh;
+        gui_redraw_drag(g_resize_win);return;
+    }
 }
-void gui_stop_resize(void){
-    if(g_resizing){ g_resizing=0; g_resize_win=-1; g_resize_dir=0; gui_redraw(); }
-    else { g_resizing=0; g_resize_win=-1; g_resize_dir=0; }
-}
+
+void gui_stop_drag(void){if(g_dragging){g_prev_drag_x=-1;gui_redraw();}g_dragging=0;g_drag_win=-1;}
+void gui_stop_resize(void){if(g_resizing){g_prev_drag_x=-1;gui_redraw();}g_resizing=0;g_resize_win=-1;g_resize_dir=0;}
 
 static void gui_redraw_window(int id){
     if(!g_running||id<0||id>=GUI_MAX_WINDOWS)return;
-    GuiWindow *w = &g_wins[id];
-    gui_add_damage(w->anim_x-10, w->anim_y-10, w->anim_w+20, w->anim_h+20);
+    cursor_erase();draw_window(id);g_cur_drawn=0;cursor_draw();
 }
 
+static void gui_redraw_drag(int id){
+    if(!g_running||id<0||id>=GUI_MAX_WINDOWS)return;
+    cursor_erase();
+    GuiWindow *win=&g_wins[id];
+
+    /* Erase previous window position with wallpaper gradient — fast, no full redraw */
+    if(g_prev_drag_x>=0){
+        int ex=g_prev_drag_x-SHADOW_OFF-6, ey=g_prev_drag_y-SHADOW_OFF-6;
+        int ew=g_prev_drag_w+SHADOW_OFF*2+12, eh=g_prev_drag_h+SHADOW_OFF*2+12;
+        if(ex<0)ex=0; if(ey<0)ey=0;
+        if(ex+ew>SCR_W)ew=SCR_W-ex; if(ey+eh>SCR_H-DOCK_H)eh=SCR_H-DOCK_H-ey;
+        if(ew>0&&eh>0){
+            /* Repaint wallpaper gradient for each row of dirty region */
+            for(int row=ey;row<ey+eh;row++){
+                u32 c=lerp_color(0x070b11,0x050810,row,SCR_H);
+                fb_draw_hline(ex,row,ew,c);
+            }
+            /* Repaint any other windows that overlap this dirty region */
+            for(int i=0;i<GUI_MAX_WINDOWS;i++){
+                if(i==id||!g_wins[i].visible||g_wins[i].minimized)continue;
+                GuiWindow *ow=&g_wins[i];
+                int ox=ow->anim_x-SHADOW_OFF-2, oy=ow->anim_y-SHADOW_OFF-2;
+                int ow2=ow->anim_w+SHADOW_OFF*2+4, oh2=ow->anim_h+SHADOW_OFF*2+4;
+                if(ox+ow2<ex||ox>ex+ew)continue;
+                if(oy+oh2<ey||oy>ey+eh)continue;
+                draw_window(i);
+            }
+        }
+    }
+    draw_window(id);
+    draw_dock();
+    g_prev_drag_x=win->x; g_prev_drag_y=win->y;
+    g_prev_drag_w=win->w; g_prev_drag_h=win->h;
+    g_cur_drawn=0; cursor_draw();
+}
 
 void gui_open_shell_window(void){
     if(g_shell_win_id>=0&&g_shell_win_id<GUI_MAX_WINDOWS&&g_wins[g_shell_win_id].visible){gui_window_set_active(g_shell_win_id);return;}
-    int id=-1;
-    for(int i=0; i<GUI_MAX_WINDOWS; i++) {
-        if(!g_wins[i].visible) { id=i; break; }
-    }
-    if (id < 0) return;
-    int sw = gui_window_create(100, 80, 560, 440, "Terminal");
-    if (sw < 0) return;
-    g_shell_win_id = sw;
-    g_shell_pos = 0;
-    g_shell_buf[0] = '\0';
-    g_shell_out_pos = 0;
-    g_shell_output[0] = '\0';
+    int id=-1;for(int i=0;i<GUI_MAX_WINDOWS;i++)if(!g_wins[i].visible){id=i;break;}
+    if(id<0)return;
+    int sw=gui_window_create(100,80,560,440,"Terminal");
+    if(sw<0)return;g_shell_win_id=sw;g_shell_pos=0;g_shell_buf[0]='\0';g_shell_out_pos=0;g_shell_output[0]='\0';
     int cy=8;gui_widget_add_label(sw,8,cy,"Systrix Shell v0.1",500);cy+=GLYPH_H+8;gui_widget_add_separator(sw,cy,501);cy+=8;gui_widget_add_label(sw,8,cy,"$ _",502);
 }
 
@@ -746,25 +683,12 @@ static void gui_process_command(void){
 
 void gui_shell_keypress(u8 ch){
     if(g_shell_win_id<0||!g_wins[g_shell_win_id].visible)return;
-    if(ch=='\r'||ch=='\n'){
-        gui_process_command();
-        if(g_shell_win_id>=0&&g_wins[g_shell_win_id].visible){
-            gui_redraw_window(g_shell_win_id);
-        }
-        return;
-    }
-    if(ch=='\b'){
-        if(g_shell_pos>0){g_shell_pos--;g_shell_buf[g_shell_pos]='\0';}
-        if(g_shell_win_id>=0&&g_wins[g_shell_win_id].visible){
-            gui_redraw_window(g_shell_win_id);
-        }
-        return;
-    }
+    if(ch=='\r'||ch=='\n'){gui_process_command();if(g_shell_win_id>=0&&g_wins[g_shell_win_id].visible){cursor_erase();draw_window(g_shell_win_id);g_cur_drawn=0;cursor_draw();}return;}
+    if(ch=='\b'){if(g_shell_pos>0){g_shell_pos--;g_shell_buf[g_shell_pos]='\0';}if(g_shell_win_id>=0&&g_wins[g_shell_win_id].visible){cursor_erase();draw_window(g_shell_win_id);g_cur_drawn=0;cursor_draw();}return;}
     if(ch<0x20)return;
     if(g_shell_pos<510){g_shell_buf[g_shell_pos++]=(char)ch;g_shell_buf[g_shell_pos]='\0';}
-    if(g_shell_win_id>=0&&g_wins[g_shell_win_id].visible){
-        gui_redraw_window(g_shell_win_id);
-    }
+    /* Only repaint the terminal window — dock and desktop unchanged */
+    if(g_shell_win_id>=0&&g_wins[g_shell_win_id].visible){cursor_erase();draw_window(g_shell_win_id);g_cur_drawn=0;cursor_draw();}
 }
 
 void gui_open_system_monitor(void){
@@ -773,35 +697,21 @@ void gui_open_system_monitor(void){
     if(id<0)return;
     int cy=8;
     if(gui_widget_add_icon(id,8,cy,5,100)<0)return;
-    if(gui_widget_add_label(id,48,cy+6,"System Monitor",101)<0) return;
-    cy+=GLYPH_H+8;
-    if(gui_widget_add_separator(id,cy,102)<0) return;
-    cy+=10;
-    if(gui_widget_add_label(id,8,cy,"CPU Usage:",103)<0) return;
-    cy+=GLYPH_H+6;
-    if(gui_widget_add_progress(id,8,cy,460,0,104)<0) return;
-    cy+=(GLYPH_H+6)+16;
-    if(gui_widget_add_label(id,8,cy,"Memory Usage:",105)<0) return;
-    cy+=GLYPH_H+6;
-    if(gui_widget_add_progress(id,8,cy,460,62,106)<0) return;
-    cy+=(GLYPH_H+6)+16;
-    if(gui_widget_add_label(id,8,cy,"Disk Usage:",107)<0) return;
-    cy+=GLYPH_H+6;
-    if(gui_widget_add_progress(id,8,cy,460,28,108)<0) return;
-    cy+=(GLYPH_H+6)+16;
-    if(gui_widget_add_separator(id,cy,109)<0) return;
-    cy+=10;
-    if(gui_widget_add_label(id,8,cy,"Running Processes:",110)<0)return;
-    cy+=GLYPH_H+4;
-    if(gui_widget_add_listrow(id,0,cy,480,"shell","PID 1",111)<0)return;
-    cy+=GLYPH_H+8;
-    if(gui_widget_add_listrow(id,0,cy,480,"file_manager","PID 2",112)<0)return;
-    cy+=GLYPH_H+8;
-    if(gui_widget_add_listrow(id,0,cy,480,"terminal","PID 3",113)<0)return;
-    cy+=GLYPH_H+8;
-    if(gui_widget_add_listrow(id,0,cy,480,"settings","PID 4",114)<0)return;
-    cy+=GLYPH_H+8;
-    cy+=6; if(gui_widget_add_separator(id,cy,115)<0)return; cy+=10;
+    if(gui_widget_add_label(id,48,cy+6,"System Monitor",101)<0)return;cy+=GLYPH_H+8;
+    if(gui_widget_add_separator(id,cy,102)<0)return;cy+=10;
+    if(gui_widget_add_label(id,8,cy,"CPU Usage:",103)<0)return;cy+=GLYPH_H+6;
+    if(gui_widget_add_progress(id,8,cy,460,0,104)<0)return;cy+=(GLYPH_H+6)+16;
+    if(gui_widget_add_label(id,8,cy,"Memory Usage:",105)<0)return;cy+=GLYPH_H+6;
+    if(gui_widget_add_progress(id,8,cy,460,62,106)<0)return;cy+=(GLYPH_H+6)+16;
+    if(gui_widget_add_label(id,8,cy,"Disk Usage:",107)<0)return;cy+=GLYPH_H+6;
+    if(gui_widget_add_progress(id,8,cy,460,28,108)<0)return;cy+=(GLYPH_H+6)+16;
+    if(gui_widget_add_separator(id,cy,109)<0)return;cy+=10;
+    if(gui_widget_add_label(id,8,cy,"Running Processes:",110)<0)return;cy+=GLYPH_H+4;
+    if(gui_widget_add_listrow(id,0,cy,480,"shell","PID 1",111)<0)return;cy+=GLYPH_H+8;
+    if(gui_widget_add_listrow(id,0,cy,480,"file_manager","PID 2",112)<0)return;cy+=GLYPH_H+8;
+    if(gui_widget_add_listrow(id,0,cy,480,"terminal","PID 3",113)<0)return;cy+=GLYPH_H+8;
+    if(gui_widget_add_listrow(id,0,cy,480,"settings","PID 4",114)<0)return;cy+=GLYPH_H+8;
+    cy+=6;if(gui_widget_add_separator(id,cy,115)<0)return;cy+=10;
     if(gui_widget_add_button(id,8,cy,90,GLYPH_H+10,"Refresh",116)<0)return;
     if(gui_widget_add_button(id,106,cy,90,GLYPH_H+10,"Close",117)<0)return;
 }
@@ -839,6 +749,7 @@ static u32 lerp_color(u32 a,u32 b,int x,int w){
 }
 static void fill_gradient_h(int x,int y,int w,int h,u32 ca,u32 cb){fb_fill_gradient_h(x,y,w,h,ca,cb);}
 static void fill_gradient_v(int x,int y,int w,int h,u32 ca,u32 cb){fb_fill_gradient_v(x,y,w,h,ca,cb);}
+static void draw_shadow_rect(int x,int y,int w,int h){fb_draw_shadow(x,y,w,h);}
 
 static void draw_char(int x,int y,char c,u32 fg,int tbg,u32 bg){
     if((unsigned char)c<0x20||(unsigned char)c>0x7e)c='?';
@@ -873,13 +784,10 @@ static int wgt_new(int win_id,int wid){
 
 int gui_window_create(int x,int y,int w,int h,const char*title){
     int id=-1;for(int i=0;i<GUI_MAX_WINDOWS;i++)if(!g_wins[i].visible){id=i;break;}
-    if (id < 0) return -1;
-    if (w < 120) { w = 120; }
-    if (h < 80) { h = 80; }
-    if (x + w > SCR_W) { x = SCR_W - w; }
-    if (y + h > SCR_H) { y = SCR_H - h; }
-    if (x < 0) { x = 0; }
-    if (y < 0) { y = 0; }
+    if(id<0)return -1;
+    if(w<120)w=120;if(h<80)h=80;
+    if(x+w>SCR_W)x=SCR_W-w;if(y+h>SCR_H)y=SCR_H-h;
+    if(x<0)x=0;if(y<0)y=0;
     if(x<0||y<0||x+w>SCR_W||y+h>SCR_H)return -1;
     GuiWindow*win=&g_wins[id];
     win->x=x;win->y=y;win->w=w;win->h=h;
@@ -887,8 +795,6 @@ int gui_window_create(int x,int y,int w,int h,const char*title){
     wcopy(win->title,title,64);
     win->visible=1;win->active=0;win->modal=0;win->minimized=0;win->maximized=0;
     win->anim_state=WIN_NORMAL;win->anim_progress=100;win->fade_alpha=255;
-    win->pixbuf = (u32*)heap_malloc((usize)w * (usize)h * 4);
-    win->dirty = 1;
     gui_window_set_active(id);
     return id;
 }
@@ -958,40 +864,36 @@ static void draw_window(int id){
         for(int i=0;i<6;i++){
             int d=i;
             int sx=x+so-d, sy=y+so-d, sw=w+d*2, sh=h+d*2;
-            if (sx < 0) { sw += sx; sx = 0; }
-            if (sy < 0) { sh += sy; sy = 0; }
-            if (sx + sw > SCR_W) { sw = SCR_W - sx; }
-            if (sy + sh > SCR_H) { sh = SCR_H - sy; }
-            if (sw <= 0 || sh <= 0) continue;
-            u32 sc = blend_color(0x000000, 0x050810, sa[i]);
-            fb_draw_rect(sx, sy, sw, sh, sc);
+            if(sx<0){sw+=sx;sx=0;} if(sy<0){sh+=sy;sy=0;}
+            if(sx+sw>SCR_W)sw=SCR_W-sx; if(sy+sh>SCR_H)sh=SCR_H-sy;
+            if(sw<=0||sh<=0)continue;
+            u32 sc=blend_color(0x000000,0x050810,sa[i]);
+            fb_draw_rect(sx,sy,sw,sh,sc);
         }
-        int sx = x + so, sy = y + so, sw = w, sh = h;
-        if (sx < 0) { sw += sx; sx = 0; }
-        if (sy < 0) { sh += sy; sy = 0; }
-        if (sx + sw > SCR_W) { sw = SCR_W - sx; }
-        if (sy + sh > SCR_H) { sh = SCR_H - sy; }
-        if (sw > 0 && sh > 0) fb_fill_rounded_rect(sx, sy, sw, sh, 0x000000);
+        int sx=x+so,sy=y+so,sw=w,sh=h;
+        if(sx<0){sw+=sx;sx=0;} if(sy<0){sh+=sy;sy=0;}
+        if(sx+sw>SCR_W)sw=SCR_W-sx; if(sy+sh>SCR_H)sh=SCR_H-sy;
+        if(sw>0&&sh>0) fb_fill_rect(sx,sy,sw,sh,0x000000);
     }
 
     /* === Active window multi-ring accent glow === */
     if(win->active&&!win->modal){
         if(x>3&&y>3&&x+w+6<SCR_W&&y+h+6<SCR_H){
-            fb_draw_rounded_rect(x-3,y-3,w+6,h+6,blend_color(C_WIN_BG,C_ACCENT,18));
-            fb_draw_rounded_rect(x-2,y-2,w+4,h+4,blend_color(C_WIN_BG,C_ACCENT,40));
+            fb_draw_rect(x-3,y-3,w+6,h+6,blend_color(C_WIN_BG,C_ACCENT,18));
+            fb_draw_rect(x-2,y-2,w+4,h+4,blend_color(C_WIN_BG,C_ACCENT,40));
         }
-        fb_draw_rounded_rect(x-1,y-1,w+2,h+2,C_WIN_BORDER_A);
+        fb_draw_rect(x-1,y-1,w+2,h+2,C_WIN_BORDER_A);
     } else if(!win->modal){
-        fb_draw_rounded_rect(x-1,y-1,w+2,h+2,blend_color(C_WIN_BORDER,0x000000,60));
+        fb_draw_rect(x-1,y-1,w+2,h+2,blend_color(C_WIN_BORDER,0x000000,60));
     }
 
     /* Window body */
-    fb_fill_rounded_rect(x,y,w,h,C_WIN_BG);
+    fb_fill_gradient_v(x,y,w,h,C_WIN_BG,blend_color(C_WIN_BG,0x000000,40));
 
     /* Border */
     u32 bc=win->active?C_WIN_BORDER_A:C_WIN_BORDER;
-    fb_draw_rounded_rect(x,y,w,h,bc);
-    if(win->active)fb_draw_rounded_rect(x+1,y+1,w-2,h-2,C_WIN_BORDER_A2);
+    fb_draw_rect(x,y,w,h,bc);
+    if(win->active)fb_draw_rect(x+1,y+1,w-2,h-2,C_WIN_BORDER_A2);
 
     /* === Titlebar: richer 3-stop gradient + glass shine === */
     u32 tl=win->modal?0x3d0010:win->active?0x1e3248:0x141c28;
@@ -1096,8 +998,7 @@ static void draw_window(int id){
             GuiWidget*wg=&g_wgts[i];if(wg->win_id!=id)continue;
             int wx=cx+wg->x,wy=cy2+wg->y;
             if(wx>=clip_x2||wy>=clip_y2||wy+GLYPH_H<=clip_y1||wx+wg->w<=clip_x1)continue;
-            if(wx<clip_x1) { wx=clip_x1; }
-            if(wy<clip_y1) { wy=clip_y1; }
+            if(wx<clip_x1)wx=clip_x1;if(wy<clip_y1)wy=clip_y1;
             switch(wg->type){
             case WT_LABEL:draw_text_clip(wx,wy,wg->text,C_TEXT,1,0,clip_x2);break;
             case WT_LABEL_DIM:draw_text_clip(wx,wy,wg->text,C_TEXT_DIM,1,0,clip_x2);break;
@@ -1338,123 +1239,193 @@ static unsigned int star_rand(void){g_star_seed^=g_star_seed<<13;g_star_seed^=g_
 
 /* Blend aurora color additively onto a pixel — NO fb_get_pixel readback.
    We know the base is a near-black gradient so just additive-clamp. */
-static void aurora_pixel(u32 *target, int px,int py,u32 col,int alpha){
+static void aurora_pixel(int px,int py,u32 col,int alpha){
     if(px<0||px>=SCR_W||py<0||py>=SCR_H)return;
+    /* Approximate base color at this row from the gradient */
     u32 base=lerp_color(0x070b11,0x050810,py,SCR_H);
-    target[py*SCR_W+px] = blend_color(base,col,alpha);
+    fb_put_pixel(px,py,blend_color(base,col,alpha));
 }
 
-static void aurora_band(u32 *target, int cy,int half_h,u32 col,int peak_alpha){
+/* Draw a soft horizontal glow band — wider = softer */
+static void aurora_band(int cy,int half_h,u32 col,int peak_alpha){
     for(int dy=-half_h;dy<=half_h;dy++){
         int y=cy+dy; if(y<MENUBAR_H||y>=SCR_H-DOCK_H)continue;
+        /* Gaussian-like falloff: stronger at center */
         int dist=dy<0?-dy:dy;
         int alpha=peak_alpha*(half_h-dist)/half_h;
         if(alpha<=0)continue;
-        for(int x=0;x<SCR_W;x+=2) aurora_pixel(target,x,y,col,alpha);
+        /* Horizontal variation using star_rand seeded per row */
+        for(int x=0;x<SCR_W;x+=2)
+            aurora_pixel(x,y,col,alpha);
     }
 }
 
-static void nebula_blob(u32 *target, int cx,int cy,int radius,u32 col,int peak_alpha){
+/* Draw a radial glow blob (nebula cloud) */
+static void nebula_blob(int cx,int cy,int radius,u32 col,int peak_alpha){
     for(int dy=-radius;dy<=radius;dy++){
         for(int dx=-radius;dx<=radius;dx++){
             int d2=dx*dx+dy*dy;
             int r2=radius*radius;
             if(d2>=r2)continue;
-            int dist_norm=(int)( (d2*256)/r2 );
+            int dist_norm=(int)( (d2*256)/r2 ); /* 0=center 255=edge */
             int alpha=peak_alpha*(256-dist_norm)/256;
             if(alpha<=0)continue;
-            aurora_pixel(target,cx+dx,cy+dy,col,alpha);
+            aurora_pixel(cx+dx,cy+dy,col,alpha);
         }
     }
 }
 
-static void render_desktop_to(u32 *target){
-    if(!target) return;
+static void draw_desktop(void){
+    /* === Base gradient — deep space blue-black === */
     for(int row=0;row<SCR_H;row++){
         u32 c=lerp_color(0x070b11,0x050810,row,SCR_H);
-        for(int col=0;col<SCR_W;col++) target[row*SCR_W+col] = c;
+        fb_draw_hline(0,row,SCR_W,c);
     }
-    aurora_band(target, SCR_H-DOCK_H-60, 45, 0x004466, 55);
-    aurora_band(target, MENUBAR_H+120,   38, 0x0a1a40, 40);
-    aurora_band(target, MENUBAR_H+60,    25, 0x200830, 30);
-    aurora_band(target, SCR_H-DOCK_H-30, 20, 0x003a52, 70);
-    nebula_blob(target, SCR_W-180, MENUBAR_H+90,   90, 0x0c1840, 50);
-    nebula_blob(target, 120,       SCR_H-DOCK_H-90,75, 0x0a2018, 45);
-    nebula_blob(target, SCR_W/2+80,MENUBAR_H+180,  65, 0x18082c, 35);
-    nebula_blob(target, 200,       MENUBAR_H+80,   55, 0x080e24, 40);
-    /* Stars */
+
+    /* === Aurora bands (deterministic, redrawn each time) === */
+    /* Band 1: deep teal aurora near the horizon */
+    aurora_band(SCR_H-DOCK_H-60, 45, 0x004466, 55);
+    /* Band 2: blue-purple mid-sky sweep */
+    aurora_band(MENUBAR_H+120,   38, 0x0a1a40, 40);
+    /* Band 3: faint magenta high arc */
+    aurora_band(MENUBAR_H+60,    25, 0x200830, 30);
+    /* Band 4: cyan shimmer close to dock */
+    aurora_band(SCR_H-DOCK_H-30, 20, 0x003a52, 70);
+
+    /* === Nebula blobs (large diffuse glow clusters) === */
+    nebula_blob(SCR_W-180, MENUBAR_H+90,   90, 0x0c1840, 50); /* top-right blue  */
+    nebula_blob(120,       SCR_H-DOCK_H-90,75, 0x0a2018, 45); /* bottom-left teal */
+    nebula_blob(SCR_W/2+80,MENUBAR_H+180,  65, 0x18082c, 35); /* center purple    */
+    nebula_blob(200,       MENUBAR_H+80,   55, 0x080e24, 40); /* left blue fog    */
+
+    /* === Horizon glow just above the dock === */
+    {
+        int hy=SCR_H-DOCK_H;
+        for(int d=0;d<20;d++){
+            int alpha=50-d*2; if(alpha<=0)break;
+            u32 base=lerp_color(0x070b11,0x050810,hy-d,SCR_H);
+            fb_draw_hline(0,hy-d,SCR_W,blend_color(base,0x40a0e0,alpha));
+        }
+    }
+
+    /* === Stars — three tiers: tiny white, warm yellow, cool blue === */
     g_star_seed=0x5EED1234;
+    /* Tier 1: 200 tiny dim white stars */
     for(int s=0;s<200;s++){
         int sx=(int)(star_rand()%SCR_W);
         int sy=(int)(star_rand()%(SCR_H-MENUBAR_H-DOCK_H))+MENUBAR_H;
         int br=(int)(star_rand()%120)+40;
-        target[sy*SCR_W+sx]= (u32)(((br)<<16)|((br)<<8)|br);
+        u32 sc=(u32)(((br)<<16)|((br)<<8)|br); /* pure white */
+        fb_put_pixel(sx,sy,sc);
     }
-}
-static void gui_draw_overlays(void){
+    /* Tier 2: 60 warm yellow-white stars */
+    for(int s=0;s<60;s++){
+        int sx=(int)(star_rand()%SCR_W);
+        int sy=(int)(star_rand()%(SCR_H-MENUBAR_H-DOCK_H))+MENUBAR_H;
+        int br=(int)(star_rand()%150)+80;
+        u32 sc=(u32)(((br)<<16)|((br*95/100)<<8)|(br*60/100)); /* warm yellow */
+        fb_put_pixel(sx,sy,sc);
+        if(br>200){
+            fb_put_pixel(sx-1,sy,blend_color(0x050810,sc,60));
+            fb_put_pixel(sx+1,sy,blend_color(0x050810,sc,60));
+            fb_put_pixel(sx,sy-1,blend_color(0x050810,sc,60));
+            fb_put_pixel(sx,sy+1,blend_color(0x050810,sc,60));
+        }
+    }
+    /* Tier 3: 40 cool blue-white stars */
+    for(int s=0;s<40;s++){
+        int sx=(int)(star_rand()%SCR_W);
+        int sy=(int)(star_rand()%(SCR_H-MENUBAR_H-DOCK_H))+MENUBAR_H;
+        int br=(int)(star_rand()%130)+90;
+        u32 sc=(u32)(((br*60/100)<<16)|((br*80/100)<<8)|br); /* cool blue */
+        fb_put_pixel(sx,sy,sc);
+        /* 4-point cross sparkle for brightest */
+        if(br>200){
+            fb_put_pixel(sx-1,sy,blend_color(0x050810,sc,70));
+            fb_put_pixel(sx+1,sy,blend_color(0x050810,sc,70));
+            fb_put_pixel(sx,sy-1,blend_color(0x050810,sc,70));
+            fb_put_pixel(sx,sy+1,blend_color(0x050810,sc,70));
+            fb_put_pixel(sx-2,sy,blend_color(0x050810,sc,25));
+            fb_put_pixel(sx+2,sy,blend_color(0x050810,sc,25));
+            fb_put_pixel(sx,sy-2,blend_color(0x050810,sc,25));
+            fb_put_pixel(sx,sy+2,blend_color(0x050810,sc,25));
+        }
+    }
+
     draw_desktop_icons();
-    if (MENUBAR_H > 0) {
-        fill_gradient_v(0,0,SCR_W,MENUBAR_H,C_MENUBAR_BG,0x100c06);
-        fb_draw_hline(0,MENUBAR_H-1,SCR_W,C_MENUBAR_SEP);
-        fb_draw_hline(0,MENUBAR_H,SCR_W,blend_color(C_MENUBAR_SEP,0xffffff,8));
-        int my=(MENUBAR_H-GLYPH_H)/2;
-        int logo_x=54;
-        draw_text(logo_x,my,"Systrix",C_ACCENT,1,0);
-        int vbx=logo_x+text_w("Systrix")+10;
-        int vbw=text_w("v0.1")+10;
-        fb_fill_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,blend_color(C_ACCENT,C_BASE,30));
-        fb_draw_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,C_ACCENT_DIM);
-        draw_text(vbx+5,my,"v0.1",C_ACCENT,1,0);
-    }
+
+    /* Menu bar */
+    fill_gradient_v(0,0,SCR_W,MENUBAR_H,C_MENUBAR_BG,0x100c06);
+    fb_draw_hline(0,MENUBAR_H-1,SCR_W,C_MENUBAR_SEP);
+    fb_draw_hline(0,MENUBAR_H,SCR_W,blend_color(C_MENUBAR_SEP,0xffffff,8));
+    int my=(MENUBAR_H-GLYPH_H)/2;
+
+    /* Menu button */
+    fb_fill_rounded_rect(4,my-2,44,GLYPH_H+4,blend_color(C_ACCENT,C_BASE,30));
+    fb_draw_rounded_rect(4,my-2,44,GLYPH_H+4,C_ACCENT_DIM);
+    draw_text_c(4,my,44,"Menu",C_ACCENT,1,0);
+
+    /* Logo */
+    int logo_x=54;
+    draw_text(logo_x,my,"Systrix",C_ACCENT,1,0);
+    int vbx=logo_x+text_w("Systrix")+10,vbw=text_w("v0.1")+10;
+    fb_fill_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,blend_color(C_ACCENT,C_BASE,30));
+    fb_draw_rounded_rect(vbx,my-1,vbw,GLYPH_H+2,C_ACCENT_DIM);
+    draw_text(vbx+5,my,"v0.1",C_ACCENT,1,0);
+
+    int mmx=vbx+vbw+30;
+    const char*menus[]={"File","Edit","View","Help",0};
+    for(int i=0;menus[i];i++){draw_text(mmx,my,menus[i],C_TEXT_MID,1,0);mmx+=text_w(menus[i])+24;}
+
     draw_system_tray();
     draw_app_launcher();
     draw_context_menu();
 }
 
 static void draw_dock(void){
-    /* Do NOT draw full-width bar anymore - floating look */
+    int dock_y=SCR_H-DOCK_H;
+    fill_gradient_v(0,dock_y,SCR_W,DOCK_H,blend_color(C_DOCK_BG,0x000000,200),C_DOCK_BG);
+    fb_draw_hline(0,dock_y,SCR_W,C_MENUBAR_SEP);
+    fb_draw_hline(0,dock_y+1,SCR_W,blend_color(C_MENUBAR_SEP,0xffffff,6));
 
-    /* Buttons config */
-    struct{const char*label;int busy;int action;int icon_type;}btns[]={
-        {"Apps",    0,0,-1}, /* Special icon for launcher */
-        {"Files",   1,1,3},
-        {"Term",    1,2,0},
-        {"Settings",0,3,1},
-        {"Monitor", 0,6,4},
-        {"About",   0,4,2},
+    /* icon_type: 0=Terminal 1=Settings 2=Help 3=Files 4=Monitor 5=Sound */
+    struct{const char*label;int active;int action;int icon_type;}btns[]={
+        {"Launcher",0,0,1},  /* Settings icon for launcher */
+        {"Files",   1,1,3},  /* Files - blue folder */
+        {"Term",    1,2,0},  /* Terminal - green */
+        {"Settings",0,3,1},  /* Settings - yellow gear */
+        {"About",   0,4,2},  /* Help - red ? */
+        {"Shell",   0,5,0},  /* Shell - green terminal */
+        {"Monitor", 0,6,4},  /* Monitor - purple screen */
         {0,0,-1,0}
     };
     int n=0;while(btns[n].label)n++;
-    int pill_w=n*(DOCK_ICON_SZ+DOCK_PAD)-DOCK_PAD+32;
+    int pill_w=n*(DOCK_ICON_SZ+DOCK_PAD)-DOCK_PAD+24;
     int pill_x=(SCR_W-pill_w)/2;
-    int pill_y=SCR_H-DOCK_H-16;
-    int pill_h=DOCK_ICON_SZ+16;
-
-    /* Glass pill background */
-    fb_fill_rounded_rect(pill_x,pill_y,pill_w,pill_h,C_DOCK_BG);
+    int pill_y=dock_y+(DOCK_H-DOCK_ICON_SZ-12)/2;
+    int pill_h=DOCK_ICON_SZ+12;
+    fb_fill_rounded_rect(pill_x,pill_y,pill_w,pill_h,blend_color(C_DOCK_PILL,0x000000,0));
     fb_draw_rounded_rect(pill_x,pill_y,pill_w,pill_h,C_WIN_BORDER);
-    /* Subtle shine on top edge */
-    fb_draw_hline(pill_x+10, pill_y+1, pill_w-20, 0x444444);
 
     g_dock_btn_cnt=0;
-    int bx=pill_x+16,by=pill_y+8;
+    int bx=pill_x+12,by=pill_y+6;
     for(int i=0;btns[i].label;i++){
         int bw=DOCK_ICON_SZ,bh=DOCK_ICON_SZ;
-        if (btns[i].icon_type == -1) {
-            /* Draw a special Logo icon for launcher */
-            fb_fill_rounded_rect(bx,by,bw,bh,C_ACCENT);
-            fb_draw_rounded_rect(bx+8,by+8,bw-16,bh-16,0xffffff);
-        } else {
-            draw_app_icon(bx,by,bw,btns[i].icon_type,btns[i].busy);
+        draw_app_icon(bx,by,bw,btns[i].icon_type,btns[i].active);
+        /* Active dot indicator below icon */
+        if(btns[i].active){
+            u32 det_colors[]={0x40e080,0xe0d040,0xe04040,0x40a0e0,0xa040e0,0xe09030};
+            u32 dot_c=det_colors[btns[i].icon_type<6?btns[i].icon_type:0];
+            int dx=bx+bw/2-2,dy=by+bh+4;
+            fb_fill_rounded_rect(dx,dy,4,4,dot_c);
         }
-        
-        if(btns[i].busy){
-            fb_fill_rounded_rect(bx+bw/2-2,by+bh+4,4,4,C_ACCENT);
-        }
+        int lx=bx+(bw-text_w(btns[i].label))/2;if(lx<bx)lx=bx;
+        draw_text(lx,pill_y+pill_h+4,btns[i].label,btns[i].active?C_TEXT:C_TEXT_DIM,1,0);
         if(g_dock_btn_cnt<DOCK_BTN_MAX){
             g_dock_btns[g_dock_btn_cnt].x=bx;g_dock_btns[g_dock_btn_cnt].y=by;
             g_dock_btns[g_dock_btn_cnt].w=bw;g_dock_btns[g_dock_btn_cnt].h=bh;
-            g_dock_btns[g_dock_btn_cnt].action=btns[i].action;g_dock_btn_cnt++;
+            g_dock_btns[g_dock_btn_cnt].action=btns[i].action;g_dock_btns[g_dock_btn_cnt].hover=0;
+            g_dock_btn_cnt++;
         }
         bx+=bw+DOCK_PAD;
     }
@@ -1509,44 +1480,23 @@ static int gui_animate(void){
     return active;
 }
 
-static void gui_add_damage(int x, int y, int w, int h) {
-    if (g_dmg_w <= 0) { g_dmg_x=x; g_dmg_y=y; g_dmg_w=w; g_dmg_h=h; return; }
-    int x1 = x < g_dmg_x ? x : g_dmg_x;
-    int y1 = y < g_dmg_y ? y : g_dmg_y;
-    int x2 = (x+w) > (g_dmg_x+g_dmg_w) ? (x+w) : (g_dmg_x+g_dmg_w);
-    int y2 = (y+h) > (g_dmg_y+g_dmg_h) ? (y+h) : (g_dmg_y+g_dmg_h);
-    g_dmg_x=x1; g_dmg_y=y1; g_dmg_w=x2-x1; g_dmg_h=y2-y1;
-}
-
 void gui_redraw(void){
-    if(!g_running) return;
-    watchdog_pet();
+    if(!g_running)return;
     int animating=gui_animate();
-    if (g_desktop_dirty) {
-        render_desktop_to(g_desktop_cache);
-        g_desktop_dirty = 0;
-        g_dmg_w = SCR_W; g_dmg_h = SCR_H;
+    if(g_desktop_dirty||animating){draw_desktop();g_desktop_dirty=0;}
+    for(int i=0;i<GUI_MAX_WINDOWS;i++)if(g_wins[i].visible&&!g_wins[i].active&&!g_wins[i].modal)draw_window(i);
+    if(g_active>=0&&g_wins[g_active].visible&&!g_wins[g_active].modal)draw_window(g_active);
+    for(int i=0;i<GUI_MAX_WINDOWS;i++){
+        if(!g_wins[i].visible||!g_wins[i].modal)continue;
+        for(int row=MENUBAR_H;row<SCR_H-DOCK_H;row++)for(int col=0;col<SCR_W;col++){u32 p=fb_get_pixel(col,row);fb_put_pixel(col,row,blend_color(p,C_MODAL_DIM,130));}
+        draw_window(i);
     }
-    if (g_dmg_w <= 0 && !animating) {
-        /* Even if no damage, we must ensure cursor is drawn if it was erased */
-        if (!g_cur_drawn) { cursor_draw(); }
-        return;
-    }
-    if (g_desktop_cache) fb_blit(g_dmg_x, g_dmg_y, g_dmg_w, g_dmg_h, g_desktop_cache, SCR_W);
-    for(int i=0;i<GUI_MAX_WINDOWS;i++) if(g_wins[i].visible) draw_window(i);
-    draw_dock();
-    gui_draw_overlays();
-    g_cur_drawn=0; cursor_draw();
-    g_dmg_w = 0;
-}
-
-void cursor_blink_tick(void){
-    g_clock_ticks++;
+    if(g_dock_dirty||animating){draw_dock();g_dock_dirty=0;}
+    g_cur_drawn=0;cursor_draw();
 }
 
 void gui_init(void){
     if(!fb_is_enabled()){fb_enable();if(!fb_is_enabled())return;}
-    if(!g_desktop_cache) g_desktop_cache = (u32*)heap_malloc(fb_get_width() * fb_get_height() * 4);
     g_running=1;g_wgt_cnt=0;g_active=-1;
     /* Center cursor on current resolution */
     g_cur_x = fb_get_width()  / 2;
@@ -1621,5 +1571,5 @@ void gui_init(void){
     gui_redraw();
 }
 
-void gui_shutdown(void){g_running=0;if(fb_is_enabled())fb_fill_rect(0,0,SCR_W,SCR_H,0x000000);}
+void gui_shutdown(void){cursor_erase();g_running=0;if(fb_is_enabled())fb_fill_rect(0,0,SCR_W,SCR_H,0x000000);}
 int gui_is_active(void){return g_running;}

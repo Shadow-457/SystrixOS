@@ -65,7 +65,8 @@ i64 process_create(u64 entry, const char *name) {
      * to steal the slot. */
     slot->state  = PSTATE_EMPTY;
 
-    if (name) strlcpy(slot->name, name, 16);
+    for (int i = 0; i < 15 && name && name[i]; i++) slot->name[i] = name[i];
+    slot->name[15] = 0;
     return (i64)slot->pid;
 }
 
@@ -78,7 +79,7 @@ void process_run(u64 pid) {
         PCB *t = (PCB*)p;
         if (t->pid != pid) continue;
 
-        kprintf("\r\nRunning: "); kprintf("%s", t->name); kprintf("\r\n");
+        print_str("\r\nRunning: "); print_str(t->name); print_str("\r\n");
         /* Transition EMPTY → RUNNING (skipping READY to avoid the
          * timer ISR window).  Any previously-run process that was
          * preempted would be READY; a fresh process starts EMPTY and
@@ -146,18 +147,18 @@ void process_destroy(PCB *t) {
 }
 
 void ps_list(void) {
-    kprintf("PID  STATE    NAME\r\n");
+    print_str("PID  STATE    NAME\r\n");
     u8 *p = (u8*)PROC_TABLE;
     for (int i = 0; i < PROC_MAX; i++, p += PROC_PCB_SIZE) {
         PCB *t = (PCB*)p;
         if (t->state == PSTATE_EMPTY) continue;
         vga_putchar((u8)('0' + (t->pid / 10) % 10));
         vga_putchar((u8)('0' + t->pid % 10));
-        kprintf("   ");
+        print_str("   ");
         const char *states[] = {"EMPTY  ","READY  ","RUNNING","DEAD   "};
-        kprintf("%s", states[t->state < 4 ? t->state : 0]);
+        print_str(states[t->state < 4 ? t->state : 0]);
         vga_putchar(' ');
-        kprintf("%s", t->name[0] ? t->name : "(none)");
-        kprintf("\r\n");
+        print_str(t->name[0] ? t->name : "(none)");
+        print_str("\r\n");
     }
 }
