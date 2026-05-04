@@ -1141,35 +1141,231 @@ struct lconv *localeconv(void) {
     return &_lconv_C;
 }
 
-int setjmp(jmp_buf env) {
-    __asm__ volatile (
-        "movq %%rbx,  0(%0)\n"
-        "movq %%rbp,  8(%0)\n"
-        "movq %%r12, 16(%0)\n"
-        "movq %%r13, 24(%0)\n"
-        "movq %%r14, 32(%0)\n"
-        "movq %%r15, 40(%0)\n"
-        "movq %%rsp, 48(%0)\n"
-        "movq (%%rsp), %%rax\n"
-        "movq %%rax, 56(%0)\n"
-        : : "r"(env) : "rax"
-    );
+/* ================================================================
+ *  POSIX additions — needed for Lynx and browser support
+ * ================================================================ */
+
+int nanosleep(const struct timespec *req, struct timespec *rem) {
+    return (int)__syscall2(35, (long)req, (long)rem);
+}
+
+unsigned int sleep(unsigned int seconds) {
+    struct timespec req = { (long)seconds, 0 };
+    nanosleep(&req, 0);
     return 0;
 }
 
-void longjmp(jmp_buf env, int val) {
-    __asm__ volatile (
-        "movq  0(%0), %%rbx\n"
-        "movq  8(%0), %%rbp\n"
-        "movq 16(%0), %%r12\n"
-        "movq 24(%0), %%r13\n"
-        "movq 32(%0), %%r14\n"
-        "movq 40(%0), %%r15\n"
-        "movq 48(%0), %%rsp\n"
-        "movq 56(%0), %%rax\n"
-        "movq %%rax, (%%rsp)\n"
-        "movl %1, %%eax\n"
-        "ret\n"
-        : : "r"(env), "r"(val != 0 ? val : 1)
-    );
+int usleep(unsigned int us) {
+    struct timespec req = { 0, (long)us * 1000 };
+    return nanosleep(&req, 0);
 }
+
+int chdir(const char *path) {
+    return (int)__syscall1(80, (long)path);
+}
+
+char *getcwd(char *buf, size_t size) {
+    long r = __syscall2(79, (long)buf, (long)size);
+    return r < 0 ? NULL : buf;
+}
+
+int access(const char *path, int mode) {
+    return (int)__syscall2(21, (long)path, (long)mode);
+}
+
+ssize_t readlink(const char *path, char *buf, size_t bufsz) {
+    return (ssize_t)__syscall3(89, (long)path, (long)buf, (long)bufsz);
+}
+
+int lstat(const char *path, struct stat *buf) {
+    return (int)__syscall2(6, (long)path, (long)buf);
+}
+
+int stat(const char *path, struct stat *buf) {
+    return (int)__syscall4(262, (long)-100 /* AT_FDCWD */, (long)path, (long)buf, 0);
+}
+
+int fstat(int fd, struct stat *buf) {
+    return (int)__syscall2(5, (long)fd, (long)buf);  /* sys_fstat */
+}
+
+int ioctl(int fd, unsigned long req, void *arg) {
+    return (int)__syscall3(16, (long)fd, (long)req, (long)arg);
+}
+
+int sysinfo(struct sysinfo *info) {
+    return (int)__syscall1(99, (long)info);
+}
+
+pid_t getppid(void) {
+    return (pid_t)__syscall0(110);
+}
+
+int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact) {
+    return (int)__syscall3(13, (long)signum, (long)act, (long)oldact);
+}
+
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
+    return (int)__syscall3(14, (long)how, (long)set, (long)oldset);
+}
+
+int sigemptyset(sigset_t *set) {
+    if (set) *set = 0;
+    return 0;
+}
+
+int sigfillset(sigset_t *set) {
+    if (set) *set = ~(sigset_t)0;
+    return 0;
+}
+
+int sigaddset(sigset_t *set, int signum) {
+    if (set && signum > 0 && signum < 64) *set |= (1ULL << signum);
+    return 0;
+}
+
+int sigdelset(sigset_t *set, int signum) {
+    if (set && signum > 0 && signum < 64) *set &= ~(1ULL << signum);
+    return 0;
+}
+
+int sigismember(const sigset_t *set, int signum) {
+    if (!set || signum <= 0 || signum >= 64) return 0;
+    return (*set >> signum) & 1;
+}
+
+/* getrlimit / setrlimit — Lynx checks these */
+int getrlimit(int resource, struct rlimit *rlim) {
+    (void)resource;
+    if (rlim) {
+        rlim->rlim_cur = 0x7FFFFFFFFFFFFFFF;
+        rlim->rlim_max = 0x7FFFFFFFFFFFFFFF;
+    }
+    return 0;
+}
+
+int setrlimit(int resource, const struct rlimit *rlim) {
+    (void)resource; (void)rlim;
+    return 0;
+}
+
+/* times — Lynx and some libc init code calls this */
+clock_t times(struct tms *buf) {
+    if (buf) {
+        buf->tms_utime = 0;
+        buf->tms_stime = 0;
+        buf->tms_cutime = 0;
+        buf->tms_cstime = 0;
+    }
+    return 0;
+}
+
+/* gettid — used by some threading stubs */
+pid_t gettid(void) {
+    return getpid();
+}
+
+/* getrusage stub */
+int getrusage(int who, struct rusage *usage) {
+    (void)who;
+    if (usage) memset(usage, 0, sizeof(*usage));
+    return 0;
+}
+
+/* fcntl — already in socket layer but user code calls it directly */
+int fcntl(int fd, int cmd, long arg) {
+    return (int)__syscall3(72, (long)fd, (long)cmd, (long)arg);
+}
+
+/* uname */
+int uname(struct utsname *buf) {
+    return (int)__syscall1(63, (long)buf);
+}
+
+/* isatty */
+int isatty(int fd) {
+    struct termios t;
+    return ioctl(fd, 0x5401 /* TCGETS */, &t) == 0;
+}
+
+/* link / symlink / unlinkat stubs — FAT32 has no links */
+int link(const char *oldpath, const char *newpath) {
+    (void)oldpath; (void)newpath; return -1;
+}
+int symlink(const char *target, const char *linkpath) {
+    (void)target; (void)linkpath; return -1;
+}
+int unlinkat(int dirfd, const char *path, int flags) {
+    (void)dirfd; (void)flags;
+    return (int)__syscall1(87, (long)path);
+}
+
+/* mkdir / rmdir */
+int mkdir(const char *path, int mode) {
+    return (int)__syscall2(83, (long)path, (long)mode);
+}
+int rmdir(const char *path) {
+    return (int)__syscall1(84, (long)path);
+}
+
+/* rename */
+int rename(const char *old, const char *newp) {
+    return (int)__syscall2(82, (long)old, (long)newp);
+}
+
+/* opendir / readdir / closedir */
+DIR *opendir(const char *path) {
+    int fd = open(path, 0);
+    if (fd < 0) return NULL;
+    DIR *d = malloc(sizeof(DIR));
+    if (!d) { close(fd); return NULL; }
+    d->fd = fd;
+    d->buf_pos = 0;
+    d->buf_len = 0;
+    return d;
+}
+
+struct dirent *readdir(DIR *d) {
+    if (!d) return NULL;
+    if (d->buf_pos >= d->buf_len) {
+        long n = __syscall3(78, (long)d->fd, (long)d->buf, sizeof(d->buf));
+        if (n <= 0) return NULL;
+        d->buf_len = (int)n;
+        d->buf_pos = 0;
+    }
+    struct dirent *de = (struct dirent*)(d->buf + d->buf_pos);
+    d->buf_pos += de->d_reclen;
+    return de;
+}
+
+int closedir(DIR *d) {
+    if (!d) return -1;
+    close(d->fd);
+    free(d);
+    return 0;
+}
+
+/* inet helpers used by Lynx / curl-like code */
+unsigned int inet_addr(const char *cp) {
+    unsigned a=0, b=0, c=0, d=0;
+    int n = 0;
+    const char *p = cp;
+    while (*p) {
+        if (*p == '.') n++;
+        else {
+            unsigned *oc = n==0?&a:n==1?&b:n==2?&c:&d;
+            *oc = *oc * 10 + (unsigned)(*p - '0');
+        }
+        p++;
+    }
+    return (d<<24)|(c<<16)|(b<<8)|a;  /* little-endian packed */
+}
+
+unsigned short htons(unsigned short v) {
+    return (unsigned short)((v>>8)|(v<<8));
+}
+unsigned short ntohs(unsigned short v) { return htons(v); }
+unsigned int   htonl(unsigned int v) {
+    return ((v>>24)&0xFF)|((v>>8)&0xFF00)|((v<<8)&0xFF0000)|((v<<24)&0xFF000000u);
+}
+unsigned int   ntohl(unsigned int v) { return htonl(v); }

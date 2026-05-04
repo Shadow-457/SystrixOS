@@ -166,7 +166,7 @@ static int e1000_init(u64 mmio_phys) {
     }
     if (!nic_mac[0] && !nic_mac[1] && !nic_mac[2] &&
         !nic_mac[3] && !nic_mac[4] && !nic_mac[5]) {
-        print_str("[e1000] no MAC — NIC absent\r\n");
+        kprintf("[e1000] no MAC — NIC absent\r\n");
         return 0;
     }
 
@@ -304,8 +304,7 @@ static u16  g_rtl_io   = 0;
 static u8   g_rtl_tx_buf[RTL_TX_COUNT][RTL_TX_BUF_SIZE] __attribute__((aligned(4)));
 static u8   g_rtl_rx_buf[RTL_RX_BUF_SIZE] __attribute__((aligned(4)));
 static int  g_rtl_tx_idx = 0;
-static u16  g_rtl_rx_ptr = 0;
-static int  g_rtl_active = 0;
+static u32  g_rtl_rx_ptr = 0;   /* u32 so the >= 64KB comparison is valid */
 
 static inline void rtl_outb(u16 off, u8  v)  { outb((u16)(g_rtl_io+off), v);  }
 static inline void rtl_outw(u16 off, u16 v)  { outw((u16)(g_rtl_io+off), v);  }
@@ -404,7 +403,7 @@ static void rtl8139_poll(void) {
 
         next:
             /* Advance read pointer (16-byte aligned, +4 for header) */
-            g_rtl_rx_ptr = (u16)((g_rtl_rx_ptr + rx_len + 4 + 3) & ~3u);
+            g_rtl_rx_ptr = (g_rtl_rx_ptr + rx_len + 4 + 3) & ~3u;
             /* Wrap within 64KB */
             if (g_rtl_rx_ptr >= 64*1024) g_rtl_rx_ptr -= 64*1024;
             /* Update CAPR (subtract 0x10 as per datasheet quirk) */
@@ -436,12 +435,12 @@ void nic_init(void) {
         if (bar && e1000_init(bar)) {
             g_nic_type = NIC_E1000;
             nic_ready  = 1;
-            print_str("[e1000] MAC=");
+            kprintf("[e1000] MAC=");
             for (int i = 0; i < 6; i++) {
                 print_hex_byte(nic_mac[i]);
-                if (i < 5) print_str(":");
+                if (i < 5) kprintf(":");
             }
-            print_str("\r\n");
+            kprintf("\r\n");
             return;
         }
     }
@@ -454,17 +453,17 @@ void nic_init(void) {
         if (io && rtl8139_init(io)) {
             g_nic_type = NIC_RTL8139;
             nic_ready  = 1;
-            print_str("[rtl8139] MAC=");
+            kprintf("[rtl8139] MAC=");
             for (int i = 0; i < 6; i++) {
                 print_hex_byte(nic_mac[i]);
-                if (i < 5) print_str(":");
+                if (i < 5) kprintf(":");
             }
-            print_str("\r\n");
+            kprintf("\r\n");
             return;
         }
     }
 
-    print_str("[nic] no supported NIC found\r\n");
+    kprintf("[nic] no supported NIC found\r\n");
 }
 
 /* Send one raw Ethernet frame */

@@ -268,9 +268,7 @@ u64 vmalloc_to_phys(void *addr) {
 
 /* ---- Print vmalloc statistics --------------------------------- */
 void vmalloc_print_stats(void) {
-    { char buf[160];
-      ksnprintf(buf, sizeof(buf),
-                "\n=== Vmalloc Statistics ===\r\n"
+    kprintf("\n=== Vmalloc Statistics ===\r\n"
                 "Total size:        256 MB\r\n"
                 "Allocated pages:   %llu (%llu KB)\r\n"
                 "Peak pages:        %llu\r\n"
@@ -282,36 +280,31 @@ void vmalloc_print_stats(void) {
                 (unsigned long long)vmalloc_peak_pages,
                 (unsigned long long)vmalloc_total_allocs,
                 (unsigned long long)vmalloc_total_frees);
-      print_str(buf); }
 
     for (u32 i = 0; i < vmalloc_track_count; i++) {
         VmallocEntry *e = &vmalloc_tracking[i];
-        char buf[64];
-        ksnprintf(buf, sizeof(buf), "  %s: %llu pages (%llu KB)\r\n",
+        kprintf("  %s: %llu pages (%llu KB)\r\n",
                   e->tag,
                   (unsigned long long)e->pages,
                   (unsigned long long)e->pages * 4);
-        print_str(buf);
     }
-    print_str("==========================\r\n");
+    kprintf("==========================\r\n");
 }
 
 /* ---- Dump all tracked allocations (leak detection) ------------ */
 void vmalloc_dump_leaks(void) {
     if (vmalloc_track_count == 0) {
-        print_str("[VMALLOC] No tracked allocations.\r\n");
+        kprintf("[VMALLOC] No tracked allocations.\r\n");
         return;
     }
 
-    print_str("[VMALLOC] Tracked allocations (potential leaks):\r\n");
+    kprintf("[VMALLOC] Tracked allocations (potential leaks):\r\n");
     for (u32 i = 0; i < vmalloc_track_count; i++) {
         VmallocEntry *e = &vmalloc_tracking[i];
-        char buf[64];
-        ksnprintf(buf, sizeof(buf), "  VA=%016llx size=%llu tag=%s\r\n",
+        kprintf("  VA=%016llx size=%llu tag=%s\r\n",
                   (unsigned long long)e->virt,
                   (unsigned long long)e->pages * PAGE_SIZE,
                   e->tag);
-        print_str(buf);
     }
 }
 

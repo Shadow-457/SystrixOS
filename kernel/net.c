@@ -74,7 +74,10 @@ static int arp_count = 0;
 
 /* ── busy-wait used by protocol timeouts ─────────────────────── */
 static void net_delay(u32 n) {
-    while (n--) __asm__ volatile("pause");
+    while (n--) {
+        __asm__ volatile("pause");
+        if ((n & 127) == 0) watchdog_pet();
+    }
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -88,7 +91,7 @@ void net_init(void) {
     nic_init();
     if (!nic_ready) return;
 
-    for (int i = 0; i < 6; i++) net_mac[i] = nic_mac[i];
+    memcpy(net_mac, nic_mac, 6);
     net_ready = 1;
 }
 
@@ -266,6 +269,7 @@ static const u8 *arp_resolve(u32 ip) {
         if (pit_ticks != start && (pit_ticks - start) >= 100) break;
         net_delay(500);
         iters++;
+        watchdog_pet();
     }
     return arp_lookup(ip);   /* one last check */
 }
@@ -278,7 +282,7 @@ static u16 ip_id_counter = 1;
 /* The default gateway — set by net_start() to QEMU slirp's 10.0.2.2 */
 u32 net_gateway = 0;
 
-static void ip_send(u32 dst_ip, u8 proto, const void *payload, u16 plen) {
+void net_ip_send(u32 dst_ip, u8 proto, const void *payload, u16 plen) {
     /* determine destination MAC */
     const u8 *dst_mac;
     if (dst_ip == 0xFFFFFFFF) {
@@ -338,11 +342,11 @@ static void icmp_send_echo(u32 dst_ip) {
     /* payload: 32 bytes of 'A' */
     memset(buf + sizeof(IcmpHdr), 'A', 32);
     icmp->checksum = ip_checksum(buf, sizeof(buf));
-    ip_send(dst_ip, 1, buf, sizeof(buf));
+    net_ip_send(dst_ip, 1, buf, sizeof(buf));
 }
 
 int net_ping(u32 ip) {
-    if (!net_ready || !net_ip) { print_str("net: not ready\r\n"); return 0; }
+    if (!net_ready || !net_ip) { kprintf("net: not ready\r\n"); return 0; }
     icmp_got_reply = 0;
     icmp_send_echo(ip);
     /* Wait up to 3 seconds (300 ticks at 100Hz).
@@ -355,6 +359,7 @@ int net_ping(u32 ip) {
         if (icmp_got_reply) return 1;
         net_delay(1000);
         iters++;
+        watchdog_pet();
         if (pit_ticks != start && (pit_ticks - start) >= 300) break;
     }
     return 0;
@@ -363,7 +368,7 @@ int net_ping(u32 ip) {
 /* ─────────────────────────────────────────────────────────────
  *  UDP send
  * ───────────────────────────────────────────────────────────── */
-static void udp_send(u32 dst_ip, u16 src_port, u16 dst_port,
+void net_udp_send(u32 dst_ip, u16 src_port, u16 dst_port,
                      const void *data, u16 dlen) {
     u16 udp_len = (u16)(sizeof(UdpHdr) + dlen);
     u8 buf[sizeof(UdpHdr) + PKT_SIZE];
@@ -374,7 +379,7 @@ static void udp_send(u32 dst_ip, u16 src_port, u16 dst_port,
     udp->checksum = 0;
     memcpy(buf + sizeof(UdpHdr), data, dlen);
     udp->checksum = transport_checksum(net_ip, dst_ip, 17, buf, udp_len);
-    ip_send(dst_ip, 17, buf, udp_len);
+    net_ip_send(dst_ip, 17, buf, udp_len);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -404,7 +409,7 @@ static void dhcp_send_discover(void) {
     pkt.options[4] = 53; pkt.options[5] = 1; pkt.options[6] = DHCP_DISCOVER;
     /* end */
     pkt.options[7] = 255;
-    udp_send(0xFFFFFFFF, 68, 67, &pkt, sizeof(pkt));
+    net_udp_send(0xFFFFFFFF, 68, 67, &pkt, sizeof(pkt));
 }
 
 static void dhcp_send_request(u32 offered_ip, u32 server_ip) {
@@ -427,7 +432,7 @@ static void dhcp_send_request(u32 offered_ip, u32 server_ip) {
     pkt.options[17] = (u8)(server_ip>>8);  pkt.options[18] = (u8)(server_ip);
     pkt.options[19] = 255;
     (void)server_ip;
-    udp_send(0xFFFFFFFF, 68, 67, &pkt, sizeof(pkt));
+    net_udp_send(0xFFFFFFFF, 68, 67, &pkt, sizeof(pkt));
 }
 
 /* run DHCP, returns 1 on success */
@@ -580,7 +585,7 @@ static void tcp_send_pkt(TcpConn *c, u8 flags, const void *data, u16 dlen) {
     if (dlen > 0) memcpy(buf + hdr_len, data, dlen);
     u16 total = (u16)(hdr_len + dlen);
     tcp->checksum = transport_checksum(net_ip, c->remote_ip, 6, buf, total);
-    ip_send(c->remote_ip, 6, buf, total);
+    net_ip_send(c->remote_ip, 6, buf, total);
 }
 
 static int tcp_connect(TcpConn *c, u32 ip, u16 port) {
@@ -601,6 +606,7 @@ static int tcp_connect(TcpConn *c, u32 ip, u16 port) {
         net_poll();
         if (c->state == TCP_ESTABLISHED) return 1;
         net_delay(10);
+        watchdog_pet();
     }
     tcp_free(c);
     return 0;
@@ -735,17 +741,17 @@ int net_http_get(u32 ip, u16 port, const char *path,
     if (!net_ready || !net_ip) return -1;
 
     TcpConn *c = tcp_alloc();
-    if (!c) { print_str("http: no free conn slots\r\n"); return -1; }
+    if (!c) { kprintf("http: no free conn slots\r\n"); return -1; }
 
     if (!tcp_connect(c, ip, port)) {
-        print_str("http: connect failed\r\n");
+        kprintf("http: connect failed\r\n");
         return -1;
     }
 
     /* build GET request */
     char req[512];
     u32 hip = ntohl(ip);
-    int rlen = ksnprintf(req, sizeof(req),
+    int rlen = snprintf(req, sizeof(req),
         "GET %s HTTP/1.0\r\nHost: %u.%u.%u.%u\r\nConnection: close\r\n\r\n",
         path,
         (hip >> 24) & 0xFF, (hip >> 16) & 0xFF,
@@ -758,6 +764,7 @@ int net_http_get(u32 ip, u16 port, const char *path,
         net_poll();
         if (c->fin_received) break;
         net_delay(10);
+        watchdog_pet();
     }
     tcp_close(c);
 
@@ -884,10 +891,10 @@ u32 net_dns_resolve(const char *hostname) {
         pkt[off++] = 0x00; pkt[off++] = 0x01;  /* QCLASS=IN */
 
         /* Send from our fixed DNS client port (1024) to port 53 */
-        udp_send(dns_server, 1024, 53, pkt, off);
-        print_str("dns: query sent (attempt ");
+        net_udp_send(dns_server, 1024, 53, pkt, off);
+        kprintf("dns: query sent (attempt ");
         vga_putchar((u8)('1' + attempt));
-        print_str("), waiting...\r\n");
+        kprintf("), waiting...\r\n");
 
         /* Wait up to 2 seconds (200 ticks) for reply */
         u64 start = pit_ticks;
@@ -898,11 +905,12 @@ u32 net_dns_resolve(const char *hostname) {
             if (pit_ticks != start && (pit_ticks - start) >= 200) break;
             net_delay(500);
             iters++;
+            watchdog_pet();
         }
     }
-    print_str("dns: failed to resolve '");
-    print_str(hostname);
-    print_str("'\r\n");
+    kprintf("dns: failed to resolve '");
+    kprintf("%s", hostname);
+    kprintf("'\r\n");
     return 0;
 }
 
@@ -913,10 +921,9 @@ u32 net_make_ip(u8 a, u8 b, u8 c, u8 d) {
 void net_print_ip(u32 ip) {
     u32 h = ntohl(ip);
     char buf[20];
-    ksnprintf(buf, sizeof(buf), "%u.%u.%u.%u",
+    kprintf("%u.%u.%u.%u",
               (h >> 24) & 0xFF, (h >> 16) & 0xFF,
               (h >>  8) & 0xFF,  h        & 0xFF);
-    print_str(buf);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1019,6 +1026,7 @@ int net_tcp_recv(TcpConn *c, void *buf, usize bufsz) {
            c->state == TCP_ESTABLISHED) {
         net_poll();
         net_delay(500);
+        watchdog_pet();
     }
     if (c->rx_len == 0) return 0;   /* EOF */
     usize n = c->rx_len;
@@ -1057,7 +1065,7 @@ static void http_send_response(TcpConn *c, int status,
                                const char *body, u16 blen) {
     const char *status_str = (status == 200) ? "200 OK" : "404 Not Found";
     char hdr[128];
-    int hlen = ksnprintf(hdr, sizeof(hdr),
+    int hlen = snprintf(hdr, sizeof(hdr),
         "HTTP/1.0 %s\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
         status_str, (unsigned)blen);
 
@@ -1151,16 +1159,15 @@ done:
 
 void net_http_serve(u16 port) {
     if (!net_ready || !net_ip) {
-        print_str("httpd: network not ready\r\n");
+        kprintf("httpd: network not ready\r\n");
         return;
     }
     if (!net_tcp_listen(port)) {
-        print_str("httpd: could not bind port\r\n");
+        kprintf("httpd: could not bind port\r\n");
         return;
     }
     http_server_running = 1;
-    { char pb[16]; ksnprintf(pb, sizeof(pb), "httpd: listening on port %u\r\n", (unsigned)port); print_str(pb); }
-    print_str("\r\nPress any key to stop.\r\n");
+    kprintf("httpd: listening on port %u\r\n\r\nPress any key to stop.\r\n", (unsigned)port);
 
     while (http_server_running) {
         net_poll();
@@ -1181,9 +1188,9 @@ void net_http_serve(u16 port) {
             }
         }
         if (client) {
-            print_str("httpd: connection from ");
+            kprintf("httpd: connection from ");
             net_print_ip(client->remote_ip);
-            print_str("\r\n");
+            kprintf("\r\n");
             http_handle_one(client);
             net_tcp_close(client);
         }
@@ -1197,7 +1204,7 @@ void net_http_serve(u16 port) {
     }
 
     net_tcp_unlisten(port);
-    print_str("httpd: stopped.\r\n");
+    kprintf("httpd: stopped.\r\n");
 }
 
 /* Called from kernel_main after fat32_init() */
@@ -1219,9 +1226,9 @@ void net_start(void) {
     u32 dns_ip = net_make_ip(10, 0, 2, 3);
     arp_table_add(dns_ip, gw_mac);
 
-    print_str("eth0: IP=");
+    kprintf("eth0: IP=");
     net_print_ip(net_ip);
-    print_str(" GW=");
+    kprintf(" GW=");
     net_print_ip(net_gateway);
-    print_str("\r\n");
+    kprintf("\r\n");
 }

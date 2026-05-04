@@ -28,21 +28,6 @@
 #include "../include/kernel.h"
 
 /* ================================================================
- *  Utility — decimal/hex printers using ksnprintf
- * ================================================================ */
-static void res_print_u64(u64 n) {
-    char buf[24];
-    ksnprintf(buf, sizeof(buf), "%llu", (unsigned long long)n);
-    print_str(buf);
-}
-
-static void res_print_hex64(u64 v) {
-    char buf[20];
-    ksnprintf(buf, sizeof(buf), "0x%016llx", (unsigned long long)v);
-    print_str(buf);
-}
-
-/* ================================================================
  *  1. SMP — Symmetric Multi-Processing
  *
  *  We locate the LAPIC and AP list by scanning for the ACPI MADT
@@ -174,138 +159,111 @@ extern void ap_entry_c(void);   /* defined below */
 static u64 smp_pml4_phys = 0;
 
 static void install_trampoline(void) {
-    /* Layout at SMP_TRAMPOLINE (0x6000):
-     *   [0x00] 16-bit real-mode entry code
-     *   [0x20] 32-bit protected-mode stub (sets PAE, PML4, EFER, paging)
-     *   [0x50] 64-bit entry stub (loads RSP, jumps to ap_entry_c)
-     *   [0x60] GDT descriptor (6 bytes)
-     *   [0x68] GDT table: null + 32-bit code + 32-bit data + 64-bit code
+    /* We store key parameters in the trampoline page itself at
+     * fixed offsets after the code, then the code reads them. */
+
+    /* Simple approach: write a small machine-code stub.
+     * Layout at 0x8000:
+     *   [0x00] 16-bit real-mode code
      *   [0xF0] smp_pml4_phys (8 bytes)
      *   [0xF8] ap_entry_c address (8 bytes)
-     *   [0xFC] per-AP stack top (8 bytes, written before each SIPI)
-     *
-     * Fix 1: GDT now includes a proper 64-bit code descriptor at 0x18
-     *         so the far-jump after enabling long mode uses a valid L-bit seg.
-     * Fix 2: EFER.LME bit is 0x100 — use correct `or eax, 0x100` encoding
-     *         (0x0D byte is or eax,imm32 — previous code used wrong imm32).
-     * Fix 3: Trampoline page and AP stacks are identity-mapped into BSP's
-     *         page table before the first SIPI so the AP doesn't #PF on the
-     *         first instruction after enabling paging.
-     * Fix 4: The 64-bit far jump after paging uses selector 0x18 (64-bit
-     *         code descriptor), not 0x08 (32-bit code descriptor).
+     *   [0xFC] AP stack pointer slot (8 bytes, per-AP filled before SIPI)
      */
     u8 *t = (u8*)SMP_TRAMPOLINE;
-    for (int i = 0; i < 0x1000; i++) t[i] = 0;
+    /* Clear trampoline page */
+    memset(t, 0, 0x1000);
 
-    /* ── Map trampoline page and AP stacks into BSP page table ── */
-    /* Without these mappings the AP faults immediately after cr0.PG=1 */
-    u64 cr3 = smp_pml4_phys;
-    /* Trampoline page */
-    vmm_map(cr3, SMP_TRAMPOLINE, SMP_TRAMPOLINE, PTE_PRESENT | PTE_WRITE);
-    /* AP stacks — one 4 KB page per AP, growing down from SMP_STACK_BASE */
-    for (int i = 0; i < SMP_MAX_CPUS; i++) {
-        u64 stack_page = SMP_STACK_BASE - (u64)(i + 1) * SMP_STACK_SZ;
-        vmm_map(cr3, stack_page, stack_page, PTE_PRESENT | PTE_WRITE);
-    }
+    /* Real-mode entry: CLI, set up data seg, jump to protected-mode setup
+     * We use the "inline shellcode" technique — write the bytes directly.
+     * This blob:
+     *   cli
+     *   xor ax,ax; mov ds,ax; mov es,ax; mov ss,ax
+     *   lgdt [cs:0x8060]      (GDT descriptor at offset 0x60)
+     *   mov eax,cr0; or al,1; mov cr0,eax   (PE bit)
+     *   ljmp 0x08:0x8020      (far jump to 32-bit stub at 0x8020)
+     *
+     * 32-bit stub at 0x8020:
+     *   set up selectors; enable PAE; load PML4 (from 0x80F0);
+     *   set EFER.LME; enable paging; ljmp 0x08:ap_entry_c_trampoline
+     *
+     * 64-bit ap_entry_c_trampoline at 0x8040:
+     *   set rsp from 0x80FC; jmp ap_entry_c
+     *
+     * This is complex to hand-assemble correctly here, so instead we
+     * use a well-known minimal trampoline byte sequence for x86-64:
+     */
 
-    /* ── 16-bit real-mode entry at 0x6000 ── */
+    /* --- 16-bit header at 0x8000 --- */
     static const u8 tramp16[] = {
-        0xFA,                         /* cli */
-        0x31, 0xC0,                   /* xor  ax, ax */
-        0x8E, 0xD8,                   /* mov  ds, ax */
-        0x8E, 0xC0,                   /* mov  es, ax */
-        0x8E, 0xD0,                   /* mov  ss, ax */
-        /* lgdt fword [0x6060]  — mem operand uses 16-bit address */
-        0x0F, 0x01, 0x16,
-        (u8)((SMP_TRAMPOLINE + 0x60) & 0xFF),
-        (u8)((SMP_TRAMPOLINE + 0x60) >> 8),
-        0x0F, 0x20, 0xC0,             /* mov  eax, cr0 */
-        0x0C, 0x01,                   /* or   al,  1   (PE) */
-        0x0F, 0x22, 0xC0,             /* mov  cr0, eax */
-        /* ljmp 0x08 : 0x00006020  (32-bit far jump via 66 prefix) */
+        0xFA,                   /* cli */
+        0x31, 0xC0,             /* xor ax,ax */
+        0x8E, 0xD8,             /* mov ds,ax */
+        0x8E, 0xC0,             /* mov es,ax */
+        0x8E, 0xD0,             /* mov ss,ax */
+        /* lgdt [0x8060] */
+        0x0F, 0x01, 0x16, 0x60, 0x80,
+        /* mov eax,cr0 */
+        0x0F, 0x20, 0xC0,
+        /* or al, 1 (set PE) */
+        0x0C, 0x01,
+        /* mov cr0, eax */
+        0x0F, 0x22, 0xC0,
+        /* ljmp 0x08:0x8020  (far jump: 66 EA lo hi 0x00 seg_lo seg_hi) */
         0x66, 0xEA,
-        (u8)((SMP_TRAMPOLINE + 0x20) & 0xFF),
-        (u8)((SMP_TRAMPOLINE + 0x20) >> 8),
-        0x00, 0x00,
-        0x08, 0x00
+        0x20, 0x80, 0x00, 0x00,  /* offset 0x8020 */
+        0x08, 0x00               /* selector 0x08 */
     };
-    for (usize i = 0; i < sizeof(tramp16); i++) t[i] = tramp16[i];
+    memcpy(t, tramp16, sizeof(tramp16));
 
-    /* ── 32-bit PM stub at 0x6020 ── */
-    /* Fix: correct or-eax-imm8 for LME (bit 8 = 0x100): use 0x80 0xC8 0x00
-     * or eax, imm32 is 0x0D <imm32>; for 0x100: 0x0D 0x00 0x01 0x00 0x00
-     * BUT the previous code had 0x0D 0x00 0x01 0x00 0x00 AFTER rdmsr which
-     * is correct — the real bug was the preceding byte sequence for rdmsr
-     * mixed in an extra 0x0D opcode. Rewritten clearly here: */
+    /* --- 32-bit PM stub at 0x8020 --- */
+    /* Sets up segments, loads PML4, enables long mode */
     static const u8 tramp32[] = {
-        /* mov ax, 0x10; mov ds/es/ss, ax */
+        /* mov ax,0x10; mov ds,ax; mov es,ax; mov ss,ax */
         0x66, 0xB8, 0x10, 0x00,
         0x8E, 0xD8, 0x8E, 0xC0, 0x8E, 0xD0,
         /* mov eax, cr4; or eax, 0x20 (PAE); mov cr4, eax */
-        0x0F, 0x20, 0xE0,
-        0x83, 0xC8, 0x20,
-        0x0F, 0x22, 0xE0,
-        /* mov eax, [SMP_TRAMPOLINE+0xF0]  — PML4 physical (low 32) */
-        0xB8,
-        (u8)((SMP_TRAMPOLINE + 0xF0) & 0xFF),
-        (u8)((SMP_TRAMPOLINE + 0xF0) >> 8),
-        0x00, 0x00,
-        /* xchg eax, [eax]  → mov eax, [eax] */
-        0x8B, 0x00,
+        0x0F, 0x20, 0xE0, 0x83, 0xC8, 0x20, 0x0F, 0x22, 0xE0,
+        /* mov eax, [0x80F0]  (low 32 bits of PML4 phys addr) */
+        0x8B, 0x05, 0xF0, 0x80, 0x00, 0x00,
         /* mov cr3, eax */
         0x0F, 0x22, 0xD8,
-        /* mov ecx, 0xC0000080 (EFER MSR) */
+        /* rdmsr EFER (0xC0000080); or eax,0x100 (LME); wrmsr */
         0xB9, 0x80, 0x00, 0x00, 0xC0,
-        /* rdmsr */
-        0x0F, 0x32,
-        /* or eax, 0x100 (LME bit 8) — correct imm32 encoding */
-        0x0D, 0x00, 0x01, 0x00, 0x00,
-        /* wrmsr */
-        0x0F, 0x30,
-        /* mov eax, cr0; or eax, 0x80000001 (PG|PE); mov cr0, eax */
+        0x0F, 0x32, 0x0D, 0x00, 0x01, 0x00, 0x00, 0x0F, 0x30,
+        /* mov eax,cr0; or eax,0x80000001; mov cr0,eax (PG+PE) */
         0x0F, 0x20, 0xC0,
         0x0D, 0x01, 0x00, 0x00, 0x80,
         0x0F, 0x22, 0xC0,
-        /* ljmp 0x18 : SMP_TRAMPOLINE+0x50  — 64-bit code segment */
-        0x66, 0xEA,
-        (u8)((SMP_TRAMPOLINE + 0x50) & 0xFF),
-        (u8)((SMP_TRAMPOLINE + 0x50) >> 8),
-        0x00, 0x00,
-        0x18, 0x00   /* selector 0x18 = 64-bit code descriptor */
+        /* ljmp 0x08:0x8040 (64-bit entry) */
+        0x66, 0xEA, 0x40, 0x80, 0x00, 0x00, 0x08, 0x00
     };
-    for (usize i = 0; i < sizeof(tramp32); i++) t[0x20 + i] = tramp32[i];
+    memcpy(t + 0x20, tramp32, sizeof(tramp32));
 
-    /* ── 64-bit entry at 0x6050 ── */
-    /* mov rsp, [SMP_TRAMPOLINE+0xFC]; jmp [SMP_TRAMPOLINE+0xF8] */
+    /* --- 64-bit entry at 0x8040 --- */
+    /* mov rsp, [0x80FC]; jmp [0x80F8] (absolute indirect) */
     static const u8 tramp64[] = {
-        /* mov rsp, qword [0x60FC] — absolute 32-bit address in low mem */
-        0x48, 0x8B, 0x24, 0x25,
-        (u8)((SMP_TRAMPOLINE + 0xFC) & 0xFF),
-        (u8)((SMP_TRAMPOLINE + 0xFC) >> 8),
-        0x00, 0x00,
-        /* jmp qword [0x60F8] */
-        0xFF, 0x24, 0x25,
-        (u8)((SMP_TRAMPOLINE + 0xF8) & 0xFF),
-        (u8)((SMP_TRAMPOLINE + 0xF8) >> 8),
-        0x00, 0x00,
+        /* mov rsp, qword [rel 0x80FC] */
+        0x48, 0x8B, 0x24, 0x25, 0xFC, 0x80, 0x00, 0x00,
+        /* jmp qword [rel 0x80F8] */
+        0xFF, 0x24, 0x25, 0xF8, 0x80, 0x00, 0x00,
     };
-    for (usize i = 0; i < sizeof(tramp64); i++) t[0x50 + i] = tramp64[i];
+    memcpy(t + 0x40, tramp64, sizeof(tramp64));
 
-    /* ── GDT descriptor at 0x6060 (6 bytes) ── */
+    /* --- Minimal GDT at 0x8060 --- */
+    /* GDT descriptor */
     u16 *gdt_desc = (u16*)(SMP_TRAMPOLINE + 0x60);
-    gdt_desc[0] = 4 * 8 - 1;                              /* 4 entries, limit */
-    *(u32*)(gdt_desc + 1) = (u32)(SMP_TRAMPOLINE + 0x68); /* base (low 4 GB) */
+    gdt_desc[0] = 23;                   /* limit = 3 entries × 8 - 1 */
+    *(u32*)(gdt_desc + 1) = (u32)(SMP_TRAMPOLINE + 0x68); /* base */
 
-    /* ── GDT table at 0x6068 — 4 entries ── */
+    /* GDT entries at 0x8068 */
     u64 *gdt = (u64*)(SMP_TRAMPOLINE + 0x68);
-    gdt[0] = 0;                          /* 0x00  null */
-    gdt[1] = 0x00CF9A000000FFFFULL;      /* 0x08  32-bit code, ring 0 */
-    gdt[2] = 0x00CF92000000FFFFULL;      /* 0x10  32-bit data, ring 0 */
-    gdt[3] = 0x00AF9A000000FFFFULL;      /* 0x18  64-bit code, ring 0 (L=1) */
+    gdt[0] = 0;                          /* null descriptor */
+    gdt[1] = 0x00CF9A000000FFFFULL;      /* 32-bit code, ring 0 */
+    gdt[2] = 0x00CF92000000FFFFULL;      /* 32-bit data, ring 0 */
 
-    /* ── Parameters ── */
-    *(u64*)(SMP_TRAMPOLINE + 0xF0) = smp_pml4_phys;
-    /* [0xF8] = ap_entry_c, [0xFC] = stack — written per-AP before SIPI */
+    /* --- Parameters at 0x80F0 --- */
+    *(u64*)(SMP_TRAMPOLINE + 0xF0) = smp_pml4_phys;  /* PML4 physical */
+    /* 0x80F8 = ap_entry_c address, 0x80FC = stack pointer — filled per AP */
 }
 
 /* Called by each AP after it reaches long mode */
@@ -328,33 +286,59 @@ void ap_entry_c(void) {
 }
 
 void smp_init(void) {
-    /* Read BSP CR3 (needed if AP bringup is ever re-enabled) */
+    /* Read BSP's CR3 to share page tables with APs */
     u64 cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     smp_pml4_phys = cr3;
 
-    /* Map LAPIC MMIO (0xFEE00000) — outside the 0..1 GB identity map.
-     * PTE_PCD (bit 4) marks the page uncacheable, required for MMIO. */
+    /* Map the LAPIC MMIO page before any lapic_read/lapic_write.
+     * entry.S identity-maps only 0..1 GB (512x2MB huge pages).
+     * 0xFEE00000 is outside that range and causes a #PF without
+     * this explicit mapping.  PTE_PCD (bit 4) disables caching. */
     vmm_map(cr3, lapic_base, lapic_base,
             PTE_PRESENT | PTE_WRITE | (1UL << 4) /* PTE_PCD */);
 
-    /* Scan MADT to count APs — no LAPIC writes yet */
+    lapic_enable();
     madt_scan();
 
     if (ap_count == 0) {
-        print_str("[SMP] Single-core only (no APs found in MADT)\r\n");
+        kprintf("[SMP] Single-core only (no APs found in MADT)\r\n");
         return;
     }
 
-    /* APs found but SIPI bringup is skipped.
-     * QEMU TCG does not reliably deliver SIPI: the AP starts at
-     * segment:offset 0:0 before the trampoline initialises, causing
-     * an immediate #PF at RIP=0 (cr2=0xFEE00310).
-     * No kernel subsystem uses secondary cores yet, so we park them. */
-    print_str("[SMP] ");
-    res_print_u64((u64)ap_count);
-    print_str(" AP(s) found — parked (SIPI deferred)\r\n");
-    smp_total_cpus = 1;
+    install_trampoline();
+
+    kprintf("[SMP] Bringing up %llu AP(s)...\r\n", (unsigned long long)(ap_count));
+
+    int prev_up = smp_cores_up;
+
+    for (int i = 0; i < ap_count; i++) {
+        u8 apic_id = ap_apic_ids[i];
+
+        /* Give this AP a stack */
+        u64 stack_top = SMP_STACK_BASE - (u64)i * SMP_STACK_SZ;
+        *(u64*)(SMP_TRAMPOLINE + 0xF8) = (u64)ap_entry_c;
+        *(u64*)(SMP_TRAMPOLINE + 0xFC) = stack_top;
+
+        lapic_send_init(apic_id);
+        lapic_send_sipi(apic_id, (u8)(SMP_TRAMPOLINE >> 12));
+        lapic_send_sipi(apic_id, (u8)(SMP_TRAMPOLINE >> 12));  /* SIPI sent twice per spec */
+
+        /* Wait up to 100ms for AP to come up */
+        int timeout = 100000;
+        while (smp_cores_up == prev_up && --timeout) {
+            for (volatile int d = 0; d < 100; d++) {}
+        }
+        if (smp_cores_up > prev_up) {
+            kprintf("[SMP] AP %llu online (core %llu)\r\n", (unsigned long long)(apic_id), (unsigned long long)(smp_cores_up) - 1);
+            prev_up = smp_cores_up;
+        } else {
+            kprintf("[SMP] AP %llu did not respond\r\n", (unsigned long long)(apic_id));
+        }
+    }
+
+    smp_total_cpus = smp_cores_up;
+    kprintf("[SMP] Total cores: %llu\r\n", (unsigned long long)(smp_total_cpus));
 }
 
 /* Dispatch fn to all idle APs (fire-and-forget, BSP does not wait) */
@@ -377,7 +361,7 @@ void smp_dispatch(void (*fn)(int cpu_id)) {
 void kernel_panic(const char *reason);
 
 void oom_kill(void) {
-    print_str("\r\n[OOM] Out of memory! Scanning for victim...\r\n");
+    kprintf("\r\n[OOM] Out of memory! Scanning for victim...\r\n");
 
     u32  free_before = pmm_free_pages();
     PCB *victim      = (void*)0;
@@ -417,24 +401,16 @@ void oom_kill(void) {
         return;
     }
 
-    print_str("[OOM] Killing PID ");
-    res_print_u64(victim->pid);
-    print_str(" (");
-    print_str(victim->name);
-    print_str(") RSS=");
-    res_print_u64((u64)best_score);
-    print_str(" pages\r\n");
+    kprintf("[OOM] Killing PID %llu (", (unsigned long long)(victim->pid));
+    kprintf("%s", victim->name);
+    kprintf(") RSS=%llu pages\r\n", (unsigned long long)(best_score));
 
     /* Mark dead — scheduler will skip it; vmm_destroy frees pages */
     victim->state = PSTATE_DEAD;
     if (victim->cr3) vmm_destroy(victim->cr3);
 
     u32 free_after = pmm_free_pages();
-    print_str("[OOM] Freed ");
-    res_print_u64((u64)(free_after - free_before));
-    print_str(" pages. Free now: ");
-    res_print_u64((u64)free_after);
-    print_str("\r\n");
+    kprintf("[OOM] Freed %llu pages. Free now: %llu\r\n", (unsigned long long)(free_after - free_before), (unsigned long long)(free_after));
 
     if (free_after == free_before)
         kernel_panic("OOM: killed process but freed no pages");
@@ -456,18 +432,14 @@ void kernel_panic(const char *reason) {
 
     if (panic_depth++ > 0) {
         /* Double panic — give up */
-        print_str("[PANIC] Double panic -- system halted\r\n");
+        kprintf("[PANIC] Double panic -- system halted\r\n");
         for (;;) __asm__ volatile("hlt");
     }
 
     /* Print banner */
-    print_str("\r\n");
-    print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
-    print_str("!!         K E R N E L  P A N I C       !!\r\n");
-    print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
-    print_str("Reason: ");
-    print_str(reason ? reason : "(null)");
-    print_str("\r\n");
+    kprintf("\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n!!         K E R N E L  P A N I C       !!\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\nReason: ");
+    kprintf("%s", reason ? reason : "(null)");
+    kprintf("\r\n");
 
     /* Register dump */
     u64 rsp, rip, cr3_val, cr2_val;
@@ -476,20 +448,16 @@ void kernel_panic(const char *reason) {
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3_val));
     __asm__ volatile("mov %%cr2, %0" : "=r"(cr2_val));
 
-    print_str("  RSP="); res_print_hex64(rsp);
-    print_str("  RIP="); res_print_hex64(rip);
-    print_str("\r\n");
-    print_str("  CR3="); res_print_hex64(cr3_val);
-    print_str("  CR2="); res_print_hex64(cr2_val);
-    print_str("\r\n");
+    kprintf("  RSP="); kprintf("0x%016llx", (unsigned long long)(rsp));
+    kprintf("  RIP="); kprintf("0x%016llx", (unsigned long long)(rip));
+    kprintf("\r\n");
+    kprintf("  CR3="); kprintf("0x%016llx", (unsigned long long)(cr3_val));
+    kprintf("  CR2="); kprintf("0x%016llx", (unsigned long long)(cr2_val));
+    kprintf("\r\n");
 
     /* Memory stats */
     u32 fp = pmm_free_pages();
-    print_str("  Free pages: ");
-    res_print_u64((u64)fp);
-    print_str(" (");
-    res_print_u64((u64)(fp * 4));
-    print_str(" KB)\r\n");
+    kprintf("  Free pages: %llu (%llu KB)\r\n", (unsigned long long)(fp), (unsigned long long)(fp * 4));
 
     /* Try soft recovery: kill the currently running process */
     PCB *cur = (void*)0;
@@ -500,15 +468,13 @@ void kernel_panic(const char *reason) {
     }
 
     if (cur) {
-        print_str("[PANIC] Attempting soft recovery: killing PID ");
-        res_print_u64(cur->pid);
-        print_str(" ("); print_str(cur->name); print_str(")\r\n");
+        kprintf("[PANIC] Attempting soft recovery: killing PID %llu", (unsigned long long)(cur->pid));
+        kprintf(" ("); kprintf("%s", cur->name); kprintf(")\r\n");
 
         cur->state = PSTATE_DEAD;
         if (cur->cr3) vmm_destroy(cur->cr3);
 
-        print_str("[PANIC] Recovery attempted. Resuming kernel.\r\n");
-        print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
+        kprintf("[PANIC] Recovery attempted. Resuming kernel.\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
 
         panic_depth = 0;
         __asm__ volatile("sti");
@@ -516,8 +482,7 @@ void kernel_panic(const char *reason) {
     }
 
     /* No recoverable process — hard halt */
-    print_str("[PANIC] No user process to kill. System halted.\r\n");
-    print_str("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
+    kprintf("[PANIC] No user process to kill. System halted.\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
     for (;;) __asm__ volatile("hlt");
 }
 
@@ -541,21 +506,17 @@ void kernel_panic(const char *reason) {
  *  and re-armed with watchdog_resume() for known-long operations.
  * ================================================================ */
 
-#define WD_TIMEOUT_MS  5000   /* 5 seconds without a pet = hang */
+#define WD_TIMEOUT_MS  30000  /* 30 seconds without a pet = hang */
 
 static volatile u32 wd_counter   = 0;
 static volatile int wd_suspended = 0;
-static volatile int wd_depth     = 0;   /* reference count for nested suspend/resume */
 static volatile int wd_enabled   = 0;
 
 void watchdog_init(void) {
     wd_counter   = 0;
     wd_suspended = 0;
-    wd_depth     = 0;
     wd_enabled   = 1;
-    print_str("[WD] Watchdog armed (timeout=");
-    res_print_u64(WD_TIMEOUT_MS);
-    print_str("ms)\r\n");
+    kprintf("[WD] Watchdog armed (timeout=%llums)\r\n", (unsigned long long)(WD_TIMEOUT_MS));
 }
 
 /* Call from any kernel subsystem to signal "still alive" */
@@ -563,11 +524,8 @@ void watchdog_pet(void) {
     wd_counter = 0;
 }
 
-void watchdog_suspend(void) { wd_depth++; wd_suspended = 1; }
-void watchdog_resume(void)  {
-    if (wd_depth > 0) wd_depth--;
-    if (wd_depth == 0) { wd_suspended = 0; wd_counter = 0; }
-}
+void watchdog_suspend(void) { wd_suspended = 1; }
+void watchdog_resume(void)  { wd_suspended = 0; wd_counter = 0; }
 
 /* Called from timer_isr — must be fast, no blocking */
 void watchdog_tick(void) {
@@ -578,41 +536,20 @@ void watchdog_tick(void) {
     /* Watchdog fired */
     wd_counter = 0;
 
-    /* Find a running user process to kill */
+    /* Find running process */
     u8 *p = (u8*)PROC_TABLE;
     for (int i = 0; i < PROC_MAX; i++, p += PROC_PCB_SIZE) {
         PCB *t = (PCB*)p;
         if (t->state == PSTATE_RUNNING && t->pid != 0) {
-            /* Kill the hung user process */
-            print_str("\r\n[WD] TIMEOUT: killing hung PID ");
-            res_print_u64(t->pid);
-            print_str(" ("); print_str(t->name); print_str(")\r\n");
+            /* Kill it */
+            kprintf("\r\n[WD] TIMEOUT: killing hung PID %llu", (unsigned long long)(t->pid));
+            kprintf(" ("); kprintf("%s", t->name); kprintf(")\r\n");
             t->state = PSTATE_DEAD;
             if (t->cr3) vmm_destroy(t->cr3);
             return;
         }
     }
 
-    /* No user process found — kernel shell is running normally.
-     * This is NOT a hang: the kernel shell legitimately executes
-     * long-running operations (ATA I/O, directory scans) in ring 0
-     * without any user PCB in PSTATE_RUNNING.  Simply reset the
-     * counter so we get another full timeout window.  Only escalate
-     * to a panic if a non-kernel process (pid > 0) exists but is
-     * stuck in READY/BLOCKED without ever being scheduled — that
-     * would indicate a scheduler bug, not normal shell activity. */
-    int any_live = 0;
-    p = (u8*)PROC_TABLE;
-    for (int i = 0; i < PROC_MAX; i++, p += PROC_PCB_SIZE) {
-        PCB *t = (PCB*)p;
-        if (t->pid != 0 && t->state != PSTATE_EMPTY && t->state != PSTATE_DEAD) {
-            any_live = 1;
-            break;
-        }
-    }
-    if (any_live) {
-        /* A user process exists but isn't running — scheduler stall */
-        kernel_panic("Watchdog: scheduler stall (live process never scheduled)");
-    }
-    /* else: pure kernel execution — just pet and continue */
+    /* Only kernel running and it's hung */
+    kernel_panic("Watchdog: kernel idle loop hung");
 }

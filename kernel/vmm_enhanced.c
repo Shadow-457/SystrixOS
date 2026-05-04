@@ -216,31 +216,31 @@ u64 vmm_vma_fragmentation(VMA *table) {
 
 /* ---- Print VMA table for debugging ---------------------------- */
 void vmm_print_vmas(VMA *table) {
-    print_str("VMA Table:\r\n");
+    kprintf("VMA Table:\r\n");
     for (int i = 0; i < VMA_MAX; i++) {
         if (table[i].start >= table[i].end) continue;
 
-        print_str("  [");
+        kprintf("  [");
         /* Print start address in hex */
         u64 v = table[i].start;
         for (int j = 48; j >= 0; j -= 4) {
             u8 nibble = (v >> j) & 0xF;
             vga_putchar(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
         }
-        print_str("-");
+        kprintf("-");
         v = table[i].end;
         for (int j = 48; j >= 0; j -= 4) {
             u8 nibble = (v >> j) & 0xF;
             vga_putchar(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
         }
-        print_str("] flags=");
+        kprintf("] flags=");
         v = table[i].flags;
         if (v & VMA_READ)  vga_putchar('R');
         if (v & VMA_WRITE) vga_putchar('W');
         if (v & VMA_EXEC)  vga_putchar('X');
         if (v & VMA_ANON)  vga_putchar('A');
         if (v & VMA_STACK) vga_putchar('S');
-        print_str("\r\n");
+        kprintf("\r\n");
     }
 }
 
@@ -378,9 +378,7 @@ int vmm_is_huge_page(u64 cr3, u64 virt) {
 
 /* ---- Print huge page statistics ------------------------------- */
 void vmm_huge_page_stats(void) {
-    char buf[128];
-    ksnprintf(buf, sizeof(buf),
-              "\n=== Huge Page Statistics ===\r\n"
+    kprintf("\n=== Huge Page Statistics ===\r\n"
               "Allocations:            %llu\r\n"
               "Frees:                  %llu\r\n"
               "Current:                %llu\r\n"
@@ -390,7 +388,6 @@ void vmm_huge_page_stats(void) {
               (unsigned long long)huge_page_frees,
               (unsigned long long)huge_page_current,
               (unsigned long long)huge_page_promoted);
-    print_str(buf);
 }
 
 /* ================================================================
@@ -439,7 +436,7 @@ int vmm_page_fault_enhanced(u64 fault_addr, u64 error_code) {
 
     u64 page = fault_addr & ~(u64)(PAGE_SIZE - 1);
     int is_write = (error_code & 2) != 0;
-    int is_user  = (error_code & 4) != 0;
+    int is_user  = (error_code & 4) != 0; (void)is_user;
     int is_prot  = (error_code & 1) != 0;
 
     /* ---- Copy-on-Write ---------------------------------------- */

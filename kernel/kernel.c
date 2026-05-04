@@ -1,5 +1,5 @@
 /* ================================================================
- *   — kernel/kernel.c
+ *  SHADOW OS — kernel/kernel.c
  *  VGA terminal, ATA PIO driver, FAT32 filesystem, VFS layer,
  *  keyboard driver, interactive shell, and kernel_main().
  * ================================================================ */
@@ -27,6 +27,11 @@ static int buf_total = 0;   /* how many rows have ever been written      */
 static int scroll_offset = 0;
 
 static u8 cur_row = 0, cur_col = 0;
+
+/* Set to 1 when vga_putchar wraps at column 80; cleared immediately
+ * by the next call.  Lets an explicit '\n' after a col-wrap be
+ * absorbed rather than advancing cur_row a second time. */
+static int col_just_wrapped = 0;
 
 /* Update VGA hardware cursor to match cur_row / cur_col */
 static void vga_update_hw_cursor(void) {
@@ -223,7 +228,20 @@ void vga_clear(void) {
     buf_next = VGA_ROWS % SCROLLBACK_ROWS;
     buf_total = VGA_ROWS;
     cur_row = cur_col = 0;
+    col_just_wrapped = 0;
     vga_update_hw_cursor();
+}
+
+/* ── sys_read_char (syscall 335) ────────────────────────────────
+ * Block until one key is pressed; return its ASCII value (or a
+ * private KEY_* code for arrow/special keys).  No echo.
+ * This pumps read_key_raw() directly so user programs get keyboard
+ * input even though the shell's read loop isn't running.          */
+i64 sys_read_char(void) {
+    __asm__ volatile("sti");
+    u8 c = read_key_raw();
+    __asm__ volatile("cli");
+    return (i64)(unsigned char)c;
 }
 
 /* Scroll the live VGA framebuffer up one row and blank the bottom line.
@@ -244,10 +262,39 @@ static void backbuf_advance(void) {
         back_buf[buf_next][i] = (u16)(VGA_ATTR << 8) | ' ';
 }
 
+/* Track whether the last character caused a column wrap.  Set to 1
+ * when writing the 80th character causes an implicit newline; cleared
+ * by the next vga_putchar call.  An explicit '\n' that arrives right
+ * after a col-wrap is a no-op row-advance (the wrap already advanced
+ * the row), preventing the double-advance that caused draw_screen to
+ * scroll all content off the top of the VGA buffer. */
+
+/* Mutable VGA text attribute — lets md_cat (and any other code) switch
+ * foreground/background colour without touching vga_putchar's logic.
+ * VGA colour byte: bits[7:4]=bg, bits[3:0]=fg  (0=black, F=bright white)
+ * Common fg values: 0F white, 0E yellow, 0B cyan, 0A green, 09 blue,
+ *                   0D magenta, 07 grey, 08 dark-grey                   */
+static u8 vga_cur_attr = VGA_ATTR;
+static inline void vga_set_attr(u8 a) { vga_cur_attr = a; }
+static inline void vga_reset_attr(void) { vga_cur_attr = VGA_ATTR; }
+
 void vga_putchar(u8 c) {
-    if (c == '\r') { cur_col = 0; vga_update_hw_cursor(); return; }
+    if (c == '\r') {
+        cur_col = 0;
+        col_just_wrapped = 0;
+        vga_update_hw_cursor();
+        return;
+    }
 
     if (c == '\n') {
+        if (col_just_wrapped) {
+            /* The previous character already did the implicit newline
+             * (col-wrap).  This explicit '\n' is redundant — absorb it
+             * so we don't advance cur_row a second time. */
+            col_just_wrapped = 0;
+            return;
+        }
+        col_just_wrapped = 0;
         cur_col = 0;
         backbuf_advance();
         if (cur_row < VGA_ROWS - 1) {
@@ -259,16 +306,19 @@ void vga_putchar(u8 c) {
         return;
     }
 
+    col_just_wrapped = 0;
+
     /* Normal character — write to back-buffer current row */
-    back_buf[buf_next][cur_col] = (u16)(VGA_ATTR << 8) | c;
+    back_buf[buf_next][cur_col] = (u16)(vga_cur_attr << 8) | c;
 
     /* Write to VGA only if live */
     if (scroll_offset == 0)
         ((u16*)VGA_BASE)[cur_row * VGA_COLS + cur_col] =
-            (u16)(VGA_ATTR << 8) | c;
+            (u16)(vga_cur_attr << 8) | c;
 
     if (++cur_col < VGA_COLS) { vga_update_hw_cursor(); return; }
     /* Wrap column → implicit newline */
+    col_just_wrapped = 1;
     cur_col = 0;
     backbuf_advance();
     if (cur_row < VGA_ROWS - 1) {
@@ -282,7 +332,7 @@ void vga_putchar(u8 c) {
 void vga_backspace(void) {
     if (cur_col == 0) return;
     cur_col--;
-    u16 blank = (u16)(VGA_ATTR << 8) | ' ';
+    u16 blank = (u16)(VGA_ATTR << 8) | ' ';   /* backspace erases with default attr */
     back_buf[buf_next][cur_col] = blank;
     if (scroll_offset == 0)
         ((u16*)VGA_BASE)[cur_row * VGA_COLS + cur_col] = blank;
@@ -290,17 +340,82 @@ void vga_backspace(void) {
 }
 
 void print_str(const char *s) {
-    while (*s) vga_putchar((u8)*s++);
+    while (*s) { vga_putchar((u8)*s++); watchdog_pet(); }
 }
 
+/* kprintf — formatted print directly to VGA via syslibc callback.
+ * No temp buffer: each character goes straight to vga_putchar.    */
+static void kprintf_putc(void *ctx, char c) {
+    (void)ctx;
+    vga_putchar((u8)c);
+    watchdog_pet();
+}
+void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void kprintf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    slibc_vprintf_cb(kprintf_putc, NULL, fmt, ap);
+    va_end(ap);
+}
+static void kprintf_size_human(u32 sz) {
+    if (sz < 1024)
+        kprintf("%u B", (unsigned)sz);
+    else if (sz < 1024 * 1024)
+        kprintf("%u.%u KB", (unsigned)(sz/1024),
+                (unsigned)((sz%1024)*10/1024));
+    else
+        kprintf("%u.%u MB", (unsigned)(sz/(1024*1024)),
+                (unsigned)((sz%(1024*1024))*10/(1024*1024)));
+}
+
+
 void print_hex_byte(u8 v) {
-    static const char hex[] = "0123456789ABCDEF";
-    vga_putchar((u8)hex[v >> 4]);
-    vga_putchar((u8)hex[v & 0xF]);
+    kprintf("%02X", (unsigned)v);
 }
 
 /* ================================================================
- *  FAT32 DRIVER (ATA I/O via drivers/ata.c)
+ *  ATA PIO (28-bit LBA, primary channel 0x1F0)
+ * ================================================================ */
+void ata_read_sector(u32 lba, void *buf) {
+    /* FIX (Bug 7): bounded poll — if disk absent this returns zeroes */
+    watchdog_suspend();
+    u32 timeout = 0x100000;
+    while ((inb(ATA_STATUS) & 0x80) && --timeout) {}
+    if (!timeout) { u16 *p = (u16*)buf; for(int i=0;i<256;i++) p[i]=0; watchdog_resume(); return; }
+    outb(ATA_DRIVE,  0xE0 | (u8)((lba >> 24) & 0x0F));
+    outb(ATA_COUNT,  1);
+    outb(ATA_LBA_LO, (u8)(lba));
+    outb(ATA_LBA_MID,(u8)(lba >> 8));
+    outb(ATA_LBA_HI, (u8)(lba >> 16));
+    outb(ATA_CMD,    ATA_CMD_READ);
+    timeout = 0x100000;
+    while (!(inb(ATA_STATUS) & 0x08) && --timeout) {}
+    if (!timeout) { u16 *p = (u16*)buf; for(int i=0;i<256;i++) p[i]=0; watchdog_resume(); return; }
+    u16 *p = (u16*)buf;
+    for (int i = 0; i < 256; i++) p[i] = inw(ATA_DATA);
+    watchdog_resume();
+}
+
+void ata_write_sector(u32 lba, const void *buf) {
+    u32 timeout = 0x100000;
+    while ((inb(ATA_STATUS) & 0x80) && --timeout) {}
+    if (!timeout) return;
+    outb(ATA_DRIVE,  0xE0 | (u8)((lba >> 24) & 0x0F));
+    outb(ATA_COUNT,  1);
+    outb(ATA_LBA_LO, (u8)(lba));
+    outb(ATA_LBA_MID,(u8)(lba >> 8));
+    outb(ATA_LBA_HI, (u8)(lba >> 16));
+    outb(ATA_CMD,    ATA_CMD_WRITE);
+    timeout = 0x100000;
+    while (!(inb(ATA_STATUS) & 0x08) && --timeout) {}
+    if (!timeout) return;
+    const u16 *p = (const u16*)buf;
+    for (int i = 0; i < 256; i++) outw(ATA_DATA, p[i]);
+    outb(ATA_CMD, ATA_CMD_FLUSH);
+}
+
+/* ================================================================
+ *  FAT32 DRIVER
  * ================================================================ */
 static u8  fat32_spc = 0;          /* sectors per cluster */
 static u32 fat32_fat_start  = 0;
@@ -778,7 +893,7 @@ i64 fat32_rename_in(const char *old83, const char *new83, u32 dir_clus) {
             ata_read_sector(lba + s, dir_buf);
             for (int e = 0; e < 16; e++) {
                 u8 *de = dir_buf + e * 32;
-                if (de[0] == 0)    goto rename_next_clus;
+                if (de[0] == 0)    return -1;
                 if (de[0] == 0xE5) continue;
                 if (de[11] & 0x08) continue; /* skip volume label */
                 if (strncmp((char*)de, old83, 11) == 0) {
@@ -788,7 +903,6 @@ i64 fat32_rename_in(const char *old83, const char *new83, u32 dir_clus) {
                 }
             }
         }
-rename_next_clus:
         clus = fat32_next_cluster(clus);
     }
     return -1;
@@ -809,18 +923,14 @@ static void to_83(const char *name, char out[11]) {
     memset(out, ' ', 11);
     int i = 0, j = 0;
     while (name[i] && name[i] != '.' && j < 8) {
-        char c = name[i++];
-        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
-        out[j++] = c;
+        out[j++] = (char)toupper((unsigned char)name[i++]);
     }
     while (name[i] && name[i] != '.') i++; /* skip rest of base */
     if (name[i] == '.') {
         i++;
         int k = 8;
         while (name[i] && k < 11) {
-            char c = name[i++];
-            if (c >= 'a' && c <= 'z') c = (char)(c - 32);
-            out[k++] = c;
+            out[k++] = (char)toupper((unsigned char)name[i++]);
         }
     }
 }
@@ -954,36 +1064,6 @@ static i64 fat32_ops_mkdir(struct vfs_inode *dir_inode, const char *name, u16 mo
     to_83(name, n83);
     u32 c = fat32_alloc_cluster();
     if (c == (u32)-1) return (i64)ENOSPC;
-
-    /* Zero the new cluster so ls doesn't read stale disk data as filenames */
-    {
-        static u8 zero_sec[512];
-        for (int i = 0; i < 512; i++) zero_sec[i] = 0;
-        u32 lba = cluster_to_lba(c);
-        for (u8 s = 0; s < fat32_spc; s++)
-            ata_write_sector(lba + s, zero_sec);
-    }
-
-    /* Write . and .. entries so cd works correctly */
-    {
-        static u8 dot_sec[512];
-        for (int i = 0; i < 512; i++) dot_sec[i] = 0;
-        /* . entry — points to this directory */
-        dot_sec[0] = '.';
-        for (int i = 1; i < 11; i++) dot_sec[i] = ' ';
-        dot_sec[11] = 0x10; /* directory */
-        dot_sec[26] = (u8)(c);       dot_sec[27] = (u8)(c >> 8);
-        dot_sec[20] = (u8)(c >> 16); dot_sec[21] = (u8)(c >> 24);
-        /* .. entry — points to parent */
-        u32 par = (u32)dir_inode->ino;
-        dot_sec[32] = '.'; dot_sec[33] = '.';
-        for (int i = 34; i < 43; i++) dot_sec[i] = ' ';
-        dot_sec[43] = 0x10;
-        dot_sec[58] = (u8)(par);       dot_sec[59] = (u8)(par >> 8);
-        dot_sec[52] = (u8)(par >> 16); dot_sec[53] = (u8)(par >> 24);
-        ata_write_sector(cluster_to_lba(c), dot_sec);
-    }
-
     fat32_create_dir_entry_in(n83, c, (u32)dir_inode->ino);
     return 0;
 }
@@ -1066,8 +1146,8 @@ static inline u8 kb_translate(u8 sc, u8 shift, u8 caps) {
     if (sc >= 0x3A) return 0;
     u8 ch = shift ? kb_sc_shift[sc] : kb_sc[sc];
     if (!ch) return 0;
-    if (caps && ch >= 'a' && ch <= 'z') ch = (u8)(ch - 32);
-    else if (caps && ch >= 'A' && ch <= 'Z') ch = (u8)(ch + 32);
+    if (caps && islower((unsigned char)ch)) ch = (u8)toupper((unsigned char)ch);
+    else if (caps && isupper((unsigned char)ch)) ch = (u8)tolower((unsigned char)ch);
     return ch;
 }
 
@@ -1082,6 +1162,11 @@ static inline u8 kb_translate(u8 sc, u8 shift, u8 caps) {
  *   - read_key() split into read_key_raw() + read_key() so callers
  *     that need raw codes (read_line) can get them.
  * ================================================================ */
+#define KEY_UP    0x80
+#define KEY_DOWN  0x81
+#define KEY_LEFT  0x82
+#define KEY_RIGHT 0x83
+#define KEY_DEL   0x7F
 
 /* Scancode tables moved to kb_sc / kb_sc_shift above — use kb_translate() */
 static u8 shift_flag  = 0;
@@ -1138,11 +1223,11 @@ u8 read_key_raw(void) {
 
 static u8 read_key(void) {
     for (;;) {
-        watchdog_pet();   /* alive — waiting for keypress */
         /* Poll until keyboard (bit0) or mouse (bit5) data ready */
         u8 st;
         while (!((st = inb(0x64)) & 1)) {
             if (st & 0x20) mouse_poll();
+            watchdog_pet();   /* shell is alive, just waiting for keypress */
         }
         if (inb(0x64) & 0x20) { mouse_poll(); continue; }
         u8 sc = inb(0x60);
@@ -1363,8 +1448,7 @@ void format_83_name(const char *src, char *dst) {
 
     /* name part (up to 8) */
     for (i = 0, j = 0; j < 8 && src[i] && src[i] != '.' && src[i] != ' '; i++, j++) {
-        u8 c = (u8)src[i];
-        dst[j] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : (char)c;
+        dst[j] = (char)toupper((unsigned char)src[i]);
     }
     /* skip past dot */
     while (src[i] && src[i] != '.') i++;
@@ -1372,8 +1456,7 @@ void format_83_name(const char *src, char *dst) {
         i++;
         /* extension (up to 3) */
         for (int k = 0; k < 3 && src[i] && src[i] != ' '; i++, k++) {
-            u8 c = (u8)src[i];
-            dst[8 + k] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : (char)c;
+            dst[8 + k] = (char)toupper((unsigned char)src[i]);
         }
     }
 }
@@ -1381,13 +1464,13 @@ void format_83_name(const char *src, char *dst) {
 /* ================================================================
  *  SHELL COMMANDS
  * ================================================================ */
-static char input_buf[128];
+static char input_buf[512];
 static char name83[12];
 static u8   cat_buf[513];
 
 /* Current working directory cluster (0 = root) */
-static u32  cwd_clus = 0;
-static char cwd_path[128] = "/";
+u32  cwd_clus = 0;   /* exported — syscall.c uses these */
+char cwd_path[128] = "/";
 
 /* ── Shell VFS helpers ──────────────────────────────────────────
  * Build full path from cwd_path + name and call new VFS layer.
@@ -1400,20 +1483,9 @@ static char cwd_path[128] = "/";
  * sh_mkdir → vfs_mkdir
  * ──────────────────────────────────────────────────────────────*/
 static void sh_fullpath(const char *name, char *out, usize outsz) {
-    if (name[0] == '/') {
-        /* absolute path — use as-is */
-        usize n = strlen(name);
-        if (n >= outsz) n = outsz - 1;
-        memcpy(out, name, n);
-        out[n] = 0;
-        return;
-    }
-    usize clen = strlen(cwd_path);
-    usize nlen = strlen(name);
-    if (clen + 1 + nlen + 1 > outsz) { out[0] = 0; return; }
-    memcpy(out, cwd_path, clen);
-    if (cwd_path[clen - 1] != '/') out[clen++] = '/';
-    memcpy(out + clen, name, nlen + 1);
+    /* slibc_path_join handles absolute vs. relative and separator insertion */
+    if (slibc_path_join(out, outsz, cwd_path, name) < 0)
+        out[0] = '\0';   /* truncation — caller will get an error from vfs */
 }
 
 static i64 sh_open(const char *name) {
@@ -1437,41 +1509,14 @@ static i64 sh_mkdir(const char *name, u16 mode) {
 #define sh_write(fd,buf,n)  vfs_write((u64)(fd),(buf),(n))
 #define sh_close(fd)        vfs_close((u64)(fd))
 
-/* Skip the first word in s, return pointer to start of next word (or NULL) */
+/* Skip the first word in s, return pointer to start of next word (or NULL).
+ * Uses isspace() from systrix_libc for robust whitespace classification. */
 static const char *get_arg(const char *s) {
-    while (*s && *s != ' ') s++;
-    while (*s == ' ') s++;
+    /* skip the first token (non-space characters) */
+    while (*s && !isspace((unsigned char)*s)) s++;
+    /* skip whitespace using isspace() from systrix_libc */
+    while (isspace((unsigned char)*s)) s++;
     return *s ? s : NULL;
-}
-
-/* Print an unsigned 32-bit integer in decimal */
-static void print_u32(u32 n) {
-    char buf[12];
-    ksnprintf(buf, sizeof(buf), "%u", (unsigned)n);
-    print_str(buf);
-}
-
-/* Print size in human-readable form: B, KB, MB */
-static void print_size_human(u32 sz) {
-    char buf[32];
-    if (sz < 1024)
-        ksnprintf(buf, sizeof(buf), "%u B", (unsigned)sz);
-    else if (sz < 1024 * 1024)
-        ksnprintf(buf, sizeof(buf), "%u.%u KB",
-                  (unsigned)(sz / 1024),
-                  (unsigned)((sz % 1024) * 10 / 1024));
-    else
-        ksnprintf(buf, sizeof(buf), "%u.%u MB",
-                  (unsigned)(sz / (1024*1024)),
-                  (unsigned)((sz % (1024*1024)) * 10 / (1024*1024)));
-    print_str(buf);
-}
-
-/* Print right-aligned decimal in `width` chars */
-static void print_u32_w(u32 n, int width) {
-    char buf[32];
-    ksnprintf(buf, sizeof(buf), "%*u", width, (unsigned)n);
-    print_str(buf);
 }
 
 /* Active cluster for directory ops — root if cwd_clus == 0 */
@@ -1493,53 +1538,24 @@ static void cmd_meminfo(void) {
     u64 total_mb = (total * 4) / 1024;
     u64 used_mb  = (used  * 4) / 1024;
     u64 free_mb  = (free  * 4ULL) / 1024;
-    print_str("Memory (4 KB pages):\r\n");
-    print_str("  Total : "); print_u32((u32)total);
-    print_str(" pages ("); print_u32((u32)total_mb); print_str(" MB)\r\n");
-    print_str("  Used  : "); print_u32((u32)used);
-    print_str(" pages ("); print_u32((u32)used_mb);  print_str(" MB)\r\n");
-    print_str("  Free  : "); print_u32(free);
-    print_str(" pages ("); print_u32((u32)free_mb);  print_str(" MB)\r\n");
-    print_str("  RAM ceiling (E820 high): ");
+    kprintf("Memory (4 KB pages):\r\n");
+    kprintf("  Total : %u pages (%u MB)\r\n", (unsigned)total, (unsigned)total_mb);
+    kprintf("  Used  : %u pages (%u MB)\r\n", (unsigned)used, (unsigned)used_mb);
+    kprintf("  Free  : %u pages (%u MB)\r\n", (unsigned)free, (unsigned)free_mb);
+    kprintf("  RAM ceiling (E820 high): ");
     /* print ram_end_actual in MB */
-    print_u32((u32)(ram_end_actual / (1024*1024))); print_str(" MB\r\n");
+    kprintf("%u", (unsigned)(ram_end_actual / (1024*1024))); kprintf(" MB\r\n");
 }
 
 static void cmd_uptime(void) {
     u32 secs  = (u32)(pit_ticks / 1000);
     u32 mins  = secs / 60;  secs %= 60;
     u32 hours = mins / 60;  mins %= 60;
-    print_str("Uptime: ");
-    print_u32(hours); print_str("h ");
-    print_u32(mins);  print_str("m ");
-    print_u32(secs);  print_str("s\r\n");
+    kprintf("Uptime: %uh %um %us\r\n", (unsigned)hours, (unsigned)mins, (unsigned)secs);
 }
 
 static void cmd_uname(void) {
-    print_str("Systrix 0.1 x86-64 (microkernel, preemptive, FAT32, ring-3 ELF)\r\n");
-}
-
-/* ---- sysinfo — Day 1 verification: confirms FB resolution ---- */
-static void cmd_sysinfo(void) {
-    print_str("=== Systrix System Info ===\r\n");
-    print_str("OS      : Systrix v0.1\r\n");
-    print_str("Arch    : x86-64\r\n");
-    print_str("Display : bochs-display (QEMU)\r\n");
-    /* Report framebuffer resolution via fbdev */
-    int fw = fb_get_width();
-    int fh = fb_get_height();
-    if (fw > 0 && fh > 0) {
-        print_str("FB Res  : ");
-        print_u32((u32)fw);
-        print_str("x");
-        print_u32((u32)fh);
-        print_str(" @ 32bpp  [OK]\r\n");
-    } else {
-        print_str("FB Res  : not initialized (run 'gui' first)\r\n");
-    }
-    print_str("RAM     : 512M (QEMU -m 512M)\r\n");
-    print_str("Shell   : type 'gui' to launch desktop\r\n");
-    print_str("===========================\r\n");
+    kprintf("Systrix 0.1 x86-64 (microkernel, preemptive, FAT32, ring-3 ELF)\r\n");
 }
 
 /* ================================================================
@@ -1548,63 +1564,96 @@ static void cmd_sysinfo(void) {
 
 /* ---- ls -------------------------------------------------------- */
 static void cmd_ls(void) {
+    u8 *dbuf = (u8*)heap_malloc(512);
+    if (!dbuf) return;
     u32 clus = cwd_active();
     int file_count = 0, dir_count = 0;
     u32 total_bytes = 0;
 
     /* Header */
-    print_str("Name           Type       Size\r\n");
-    print_str("----           ----       ----\r\n");
+    kprintf("Name                         Type    Size\r\n----                         ----    ----\r\n");
+
+    /* LFN accumulator: up to 20 LFN entries * 13 UCS-2 chars = 260 chars */
+    char lfn_buf[261];
+    int  lfn_len = 0;
 
     while (clus < 0x0FFFFFF8) {
-        watchdog_pet();   /* still alive — listing directory */
         u32 lba = cluster_to_lba(clus);
         for (u8 s = 0; s < fat32_spc; s++) {
-            watchdog_pet();   /* pet per-sector: ata_read_sector resumes watchdog but doesn't pet */
-            ata_read_sector(lba + s, dir_buf);
+            ata_read_sector(lba + s, dbuf);
             for (int e = 0; e < 16; e++) {
-                u8 *de = dir_buf + e * 32;
-                if (de[0] == 0x00) goto ls_done;
-                if (de[0] == 0xE5) continue;
+                watchdog_pet();
+                u8 *de = dbuf + e * 32;
+                if (de[0] == 0x00) { heap_free(dbuf); goto ls_done; }
+                if (de[0] == 0xE5) { lfn_len = 0; continue; }
                 u8 attr = de[11];
-                if (attr == 0x0F) continue;  /* LFN entry */
-                if (attr & 0x08) continue;   /* volume label */
-                if (attr & 0x02) continue;   /* hidden */
-                /* skip . and .. */
-                if (de[0] == '.') continue;
 
-                /* format 8.3 name */
-                char name[13]; int ni = 0;
-                for (int k = 0; k < 8 && de[k] != ' '; k++)
-                    name[ni++] = (char)de[k];
-                if (de[8] != ' ') {
-                    name[ni++] = '.';
-                    for (int k = 8; k < 11 && de[k] != ' '; k++)
-                        name[ni++] = (char)de[k];
+                /* Collect LFN entry (attr == 0x0F) */
+                if (attr == 0x0F) {
+                    /* LFN entry: chars at offsets 1,3,5,7,9 (5 chars),
+                       14,16,18,20,22,24 (6 chars), 28,30 (2 chars) = 13 UCS-2 */
+                    static const int lfn_off[13] = {1,3,5,7,9,14,16,18,20,22,24,28,30};
+                    u8 seq = de[0] & 0x1F;  /* sequence number 1-based */
+                    if (seq < 1 || seq > 20) { lfn_len = 0; continue; }
+                    /* Write 13 chars into correct position in lfn_buf */
+                    int base = (seq - 1) * 13;
+                    for (int ci = 0; ci < 13; ci++) {
+                        u16 wc = (u16)(de[lfn_off[ci]]) | ((u16)(de[lfn_off[ci]+1]) << 8);
+                        if (wc == 0x0000 || wc == 0xFFFF) {
+                            /* end of name in this entry */
+                            if (base + ci > lfn_len) lfn_len = base + ci;
+                            break;
+                        }
+                        lfn_buf[base + ci] = (wc < 0x80) ? (char)wc : '?';
+                        if (base + ci + 1 > lfn_len) lfn_len = base + ci + 1;
+                    }
+                    continue;
                 }
-                name[ni] = 0;
+
+                if (attr & 0x08) { lfn_len = 0; continue; }  /* volume label */
+                if (attr & 0x02) { lfn_len = 0; continue; }  /* hidden */
+                if (de[0] == '.') { lfn_len = 0; continue; } /* . and .. */
+
+                /* Determine display name: prefer LFN, fall back to 8.3 */
+                char name[261];
+                int  ni;
+                if (lfn_len > 0) {
+                    lfn_buf[lfn_len] = 0;
+                    /* copy LFN into name */
+                    for (ni = 0; ni < lfn_len && ni < 260; ni++)
+                        name[ni] = lfn_buf[ni];
+                    name[ni] = 0;
+                    lfn_len = 0;
+                } else {
+                    /* format 8.3 name */
+                    ni = 0;
+                    for (int k = 0; k < 8 && de[k] != ' '; k++)
+                        name[ni++] = (char)de[k];
+                    if (de[8] != ' ') {
+                        name[ni++] = '.';
+                        for (int k = 8; k < 11 && de[k] != ' '; k++)
+                            name[ni++] = (char)de[k];
+                    }
+                    name[ni] = 0;
+                }
 
                 int is_dir = (attr & 0x10) ? 1 : 0;
 
-                /* print name, padded to 15 */
-                print_str(name);
+                /* print name, padded to 28 chars */
+                kprintf("%s", name);
                 if (is_dir) vga_putchar('/');
-                { char pad_buf[16];
+                { char pad_buf[32];
                   int used = ni + is_dir;
-                  int pad  = (used < 15) ? 15 - used : 0;
-                  for (int k = 0; k < pad; k++) pad_buf[k] = ' ';
-                  pad_buf[pad] = '\0';
-                  print_str(pad_buf); }
+                  int pad  = (used < 28) ? 28 - used : 1;
+                  slibc_str_repeat(pad_buf, ' ', (usize)pad);
+                  kprintf("%s", pad_buf); }
 
                 if (is_dir) {
-                    print_str("<DIR>      ");
-                    print_str("     -\r\n");
+                    kprintf("<DIR>      -\r\n");
                     dir_count++;
                 } else {
                     u32 sz = *(u32*)(de + 28);
-                    print_str("file       ");
-                    print_u32_w(sz, 6);
-                    print_str(" B\r\n");
+                    kprintf("file  %*u B\r\n", 6, (unsigned)(sz));
                     total_bytes += sz;
                     file_count++;
                 }
@@ -1613,11 +1662,10 @@ static void cmd_ls(void) {
         clus = fat32_next_cluster(clus);
     }
 ls_done:
-    print_str("----           ----       ----\r\n");
-    { char fbuf[32]; ksnprintf(fbuf, sizeof(fbuf), "%d file(s), ", file_count); print_str(fbuf); }
-    { char dbuf[32]; ksnprintf(dbuf, sizeof(dbuf), "%d dir(s)   total: ", dir_count); print_str(dbuf); }
-    print_size_human(total_bytes);
-    print_str("\r\n");
+    kprintf("----                         ----    ----\r\n%d file(s), %d dir(s)   total: ", file_count, dir_count);
+    kprintf_size_human(total_bytes);
+    kprintf("\r\n");
+    if (dbuf) heap_free(dbuf);
 }
 
 /* ---- cd -------------------------------------------------------- */
@@ -1665,7 +1713,7 @@ static void cmd_cd(const char *name) {
         clus = fat32_next_cluster(clus);
     }
 cd_notfound:
-    print_str("cd: no such directory\r\n");
+    kprintf("cd: no such directory\r\n");
 }
 
 /* ---- stat ------------------------------------------------------ */
@@ -1686,17 +1734,17 @@ static void cmd_stat(const char *name) {
                 for (int k = 0; k < 11; k++) if (de[k] != (u8)n83[k]) { match = 0; break; }
                 if (!match) continue;
 
-                print_str("File : "); print_str(name); print_str("\r\n");
-                print_str("Type : "); print_str((attr & 0x10) ? "Directory" : "File"); print_str("\r\n");
+                kprintf("File : "); kprintf("%s", name); kprintf("\r\n");
+                kprintf("Type : "); kprintf("%s", (attr & 0x10) ? "Directory" : "File"); kprintf("\r\n");
                 if (!(attr & 0x10)) {
                     u32 sz = *(u32*)(de + 28);
-                    print_str("Size : "); print_u32(sz); print_str(" B (");
-                    print_size_human(sz); print_str(")\r\n");
+                    kprintf("Size : "); kprintf("%u", (unsigned)(sz)); kprintf(" B (");
+                    kprintf_size_human(sz); kprintf(")\r\n");
                 }
                 u32 hi = *(u16*)(de + 20);
                 u32 lo = *(u16*)(de + 26);
                 u32 fc = (hi << 16) | lo;
-                print_str("Clus : "); print_u32(fc); print_str("\r\n");
+                kprintf("Clus : "); kprintf("%u", (unsigned)(fc)); kprintf("\r\n");
                 /* FAT date/time (creation) */
                 u16 cdate = *(u16*)(de + 16);
                 u16 ctime = *(u16*)(de + 14);
@@ -1705,20 +1753,18 @@ static void cmd_stat(const char *name) {
                 u32 day   = cdate & 0x1F;
                 u32 hour  = (ctime >> 11) & 0x1F;
                 u32 min   = (ctime >> 5) & 0x3F;
-                { char dbuf[32];
-                  ksnprintf(dbuf, sizeof(dbuf), "Date : %u-%02u-%02u  %02u:%02u\r\n",
+                kprintf("Date : %u-%02u-%02u  %02u:%02u\r\n",
                             year, mon, day, hour, min);
-                  print_str(dbuf); }
                 u8 ro = (attr & 0x01) ? 1 : 0;
-                print_str("Attr : "); print_str(ro ? "read-only" : "read-write");
-                print_str("\r\n");
+                kprintf("Attr : "); kprintf("%s", ro ? "read-only" : "read-write");
+                kprintf("\r\n");
                 return;
             }
         }
         clus = fat32_next_cluster(clus);
     }
 stat_notfound:
-    print_str("stat: not found\r\n");
+    kprintf("stat: not found\r\n");
 }
 
 /* ---- df -------------------------------------------------------- */
@@ -1728,7 +1774,7 @@ static void cmd_df(void) {
      * Also use the FAT sector cache (fat_read_cached) so repeated calls
      * don't hammer the disk with redundant sector reads. */
     u32 total_clus = fat32_total_clus;
-    if (total_clus == 0) { print_str("df: filesystem not mounted\r\n"); return; }
+    if (total_clus == 0) { kprintf("df: filesystem not mounted\r\n"); return; }
 
     u32 free_clus = 0;
     for (u32 c = 2; c < total_clus + 2; c++) {
@@ -1745,12 +1791,12 @@ static void cmd_df(void) {
     u32 free_bytes  = free_clus  * clus_bytes;
     u32 used_bytes  = total_bytes - free_bytes;
 
-    print_str("Filesystem : FAT32\r\n");
-    print_str("Total      : "); print_size_human(total_bytes); print_str("\r\n");
-    print_str("Used       : "); print_size_human(used_bytes);  print_str("\r\n");
-    print_str("Free       : "); print_size_human(free_bytes);  print_str("\r\n");
-    print_str("Clusters   : "); print_u32(free_clus); print_str(" free / ");
-    print_u32(total_clus); print_str(" total\r\n");
+    kprintf("Filesystem : FAT32\r\n");
+    kprintf("Total      : "); kprintf_size_human(total_bytes); kprintf("\r\n");
+    kprintf("Used       : "); kprintf_size_human(used_bytes);  kprintf("\r\n");
+    kprintf("Free       : "); kprintf_size_human(free_bytes);  kprintf("\r\n");
+    kprintf("Clusters   : "); kprintf("%u", (unsigned)(free_clus)); kprintf(" free / ");
+    kprintf("%u", (unsigned)(total_clus)); kprintf(" total\r\n");
 }
 
 /* ---- find ------------------------------------------------------ */
@@ -1785,10 +1831,8 @@ static void cmd_find(const char *pattern) {
                     for (int k = 0; k <= ni && !match; k++) {
                         pi = 0;
                         while (pattern[pi] && k + pi <= ni) {
-                            char a = name[k+pi];
-                            char b = pattern[pi];
-                            if (a >= 'A' && a <= 'Z') a += 32;
-                            if (b >= 'A' && b <= 'Z') b += 32;
+                            char a = (char)tolower((unsigned char)name[k+pi]);
+                            char b = (char)tolower((unsigned char)pattern[pi]);
                             if (a != b) break;
                             pi++;
                         }
@@ -1797,19 +1841,19 @@ static void cmd_find(const char *pattern) {
                     if (!match) continue;
                 }
 
-                print_str(cwd_path);
+                kprintf("%s", cwd_path);
                 if (cwd_path[1] != 0) vga_putchar('/');  /* not root */
-                print_str(name);
+                kprintf("%s", name);
                 if (attr & 0x10) vga_putchar('/');
-                print_str("\r\n");
+                kprintf("\r\n");
                 found++;
             }
         }
         clus = fat32_next_cluster(clus);
     }
 find_done:
-    if (!found) print_str("find: no matches\r\n");
-    else { print_u32((u32)found); print_str(" match(es)\r\n"); }
+    if (!found) kprintf("find: no matches\r\n");
+    else { kprintf("%u", (unsigned)(found)); kprintf(" match(es)\r\n"); }
 }
 
 /* ---- head / tail ----------------------------------------------- */
@@ -1818,13 +1862,11 @@ static void cmd_head(const char *arg) {
     const char *a2 = get_arg(arg);
     int lines = 10;
     if (a2) {
-        lines = 0;
-        for (; *a2 >= '0' && *a2 <= '9'; a2++) lines = lines * 10 + (*a2 - '0');
+        lines = atoi(a2);
         if (!lines) lines = 10;
     }
-    char n83[12]; format_83_name(arg, n83);
-    i64 fd = sh_open(n83);
-    if (fd < 0) { print_str("head: file not found\r\n"); return; }
+    i64 fd = sh_open(arg);
+    if (fd < 0) { kprintf("head: file not found\r\n"); return; }
     int lc = 0;
     for (;;) {
         i64 n = sh_read(fd, cat_buf, 512);
@@ -1836,7 +1878,7 @@ static void cmd_head(const char *arg) {
         if (lc >= lines) break;
     }
     sh_close(fd);
-    print_str("\r\n");
+    kprintf("\r\n");
 }
 
 static void cmd_tail(const char *arg) {
@@ -1844,17 +1886,15 @@ static void cmd_tail(const char *arg) {
     const char *a2 = get_arg(arg);
     int lines = 10;
     if (a2) {
-        lines = 0;
-        for (; *a2 >= '0' && *a2 <= '9'; a2++) lines = lines * 10 + (*a2 - '0');
+        lines = atoi(a2);
         if (!lines) lines = 10;
     }
-    char n83[12]; format_83_name(arg, n83);
-    i64 fd = sh_open(n83);
-    if (fd < 0) { print_str("tail: file not found\r\n"); return; }
+    i64 fd = sh_open(arg);
+    if (fd < 0) { kprintf("tail: file not found\r\n"); return; }
 
     /* read full file */
     u8 *buf = (u8*)heap_malloc(32768);
-    if (!buf) { sh_close(fd); print_str("OOM\r\n"); return; }
+    if (!buf) { sh_close(fd); kprintf("OOM\r\n"); return; }
     usize total = 0;
     for (;;) {
         i64 n = sh_read(fd, buf + total, 512);
@@ -1874,17 +1914,16 @@ static void cmd_tail(const char *arg) {
     if (start > 0) start++;  /* skip the newline we stopped on */
     for (usize i = start; i < total; i++) vga_putchar(buf[i]);
     heap_free(buf);
-    print_str("\r\n");
+    kprintf("\r\n");
 }
 
 /* ---- append ---------------------------------------------------- */
 static void cmd_append(const char *arg) {
     const char *text = get_arg(arg);
-    if (!text) { print_str("Usage: append <file> <text>\r\n"); return; }
-    char n83[12]; format_83_name(arg, n83);
-    i64 fd = sh_open(n83);
-    if (fd < 0) fd = sh_create(n83, 0644);
-    if (fd < 0) { print_str("Error.\r\n"); return; }
+    if (!text) { kprintf("Usage: append <file> <text>\r\n"); return; }
+    i64 fd = sh_open(arg);
+    if (fd < 0) fd = sh_create(arg, 0644);
+    if (fd < 0) { kprintf("Error.\r\n"); return; }
     i64 sz = vfs_seek((u64)fd, 0, 2); /* seek to end */
     (void)sz;
     usize tlen = strlen(text);
@@ -1896,16 +1935,17 @@ static void cmd_append(const char *arg) {
     }
     sh_write(fd, "\r\n", 2);
     sh_close(fd);
-    print_str("Appended.\r\n");
+    kprintf("Appended.\r\n");
 }
 
 /* ---- mkdir / rmdir --------------------------------------------- */
 static void cmd_mkdir(const char *name) {
     char n83[12]; format_83_name(name, n83);
-    if (sh_mkdir(n83, 0755) == 0)
-        print_str("Directory created.\r\n");
+    i64 r = sh_mkdir(n83, 0755);
+    if (r == 0)
+        kprintf("Directory created.\r\n");
     else
-        print_str("mkdir: failed\r\n");
+        kprintf("mkdir: %s\r\n", strerror((int)r));
 }
 
 static void cmd_rmdir(const char *name) {
@@ -1936,7 +1976,7 @@ static void cmd_rmdir(const char *name) {
         clus = fat32_next_cluster(clus);
     }
 rmdir_search_done:
-    if (dir_clus == (u32)-1) { print_str("rmdir: not found\r\n"); return; }
+    if (dir_clus == (u32)-1) { kprintf("rmdir: not found\r\n"); return; }
 
     /* check if empty */
     u32 dc = dir_clus;
@@ -1950,7 +1990,7 @@ rmdir_search_done:
                 if (de[0] == 0xE5) continue;
                 if (de[0] == '.') continue;
                 if (!(de[11] & 0x08)) {
-                    print_str("rmdir: directory not empty\r\n");
+                    kprintf("rmdir: directory not empty\r\n");
                     return;
                 }
             }
@@ -1960,16 +2000,93 @@ rmdir_search_done:
 rmdir_check_done:
     /* delete via fat32_delete_file (marks entry 0xE5, frees chain) */
     if (sh_unlink(n83) == 0)
-        print_str("Directory removed.\r\n");
+        kprintf("Directory removed.\r\n");
     else
-        print_str("rmdir: failed\r\n");
+        kprintf("rmdir: failed\r\n");
+}
+
+/* ---- calc ------------------------------------------------------
+ * Evaluate a simple arithmetic expression:  <num> <op> <num>
+ * Supports: +  -  *  /  %  and optional parens around the whole expr.
+ * All arithmetic is 64-bit signed.  Division by zero is caught.
+ * Examples:
+ *   calc 6 * 7          → 42
+ *   calc 1024 / 8       → 128
+ *   calc 100 - 37       → 63
+ *   calc 7 % 3          → 1
+ *
+ * Extended form (no-spaces, e.g. "calc 3+4") is also accepted by
+ * the inline scanner below.
+ * ---------------------------------------------------------------- */
+
+/* Skip leading whitespace, parse a signed 64-bit integer, advance *pp. */
+static i64 calc_parse_int(const char **pp) {
+    const char *p = *pp;
+    while (isspace((unsigned char)*p)) p++;
+    i64 neg = 1;
+    if (*p == '-') { neg = -1; p++; }
+    else if (*p == '+') { p++; }
+    if (!isdigit((unsigned char)*p)) { *pp = p; return INT64_MIN; } /* sentinel = parse error */
+    i64 v = 0;
+    while (isdigit((unsigned char)*p))
+        v = v * 10 + (*p++ - '0');
+    *pp = p;
+    return neg * v;
+}
+
+static void cmd_calc(const char *arg) {
+    if (!arg || !*arg) {
+        kprintf("Usage: calc <expr>   e.g.  calc 6 * 7\r\n");
+        kprintf("  Operators: + - * / %%\r\n");
+        return;
+    }
+
+    const char *p = arg;
+    i64 a = calc_parse_int(&p);
+    if (a == INT64_MIN) { kprintf("calc: invalid number\r\n"); return; }
+
+    while (isspace((unsigned char)*p)) p++;
+    if (!*p) {
+        /* Single number — just echo it */
+        kprintf("%lld\r\n", (long long)a);
+        return;
+    }
+
+    char op = *p++;
+
+    i64 b = calc_parse_int(&p);
+    if (b == INT64_MIN) { kprintf("calc: invalid number after operator\r\n"); return; }
+
+    /* Skip any trailing chars (spaces, closing paren, etc.) */
+    while (isspace((unsigned char)*p)) p++;
+    if (*p) { kprintf("calc: unexpected input after expression\r\n"); return; }
+
+    i64 result;
+    switch (op) {
+        case '+': result = a + b; break;
+        case '-': result = a - b; break;
+        case '*': result = a * b; break;
+        case 'x': result = a * b; break;   /* 'x' as alternative multiply */
+        case '/':
+            if (b == 0) { kprintf("calc: division by zero\r\n"); return; }
+            result = a / b;
+            break;
+        case '%':
+            if (b == 0) { kprintf("calc: modulo by zero\r\n"); return; }
+            result = a % b;
+            break;
+        default:
+            kprintf("calc: unknown operator '%c'  (use + - * / %%)\r\n", op);
+            return;
+    }
+
+    kprintf("%lld\r\n", (long long)result);
 }
 
 /* ---- wc -------------------------------------------------------- */
 static void cmd_wc(const char *name) {
-    char n83[12]; format_83_name(name, n83);
-    i64 fd = sh_open(n83);
-    if (fd < 0) { print_str("wc: file not found\r\n"); return; }
+    i64 fd = sh_open(name);
+    if (fd < 0) { kprintf("wc: file not found\r\n"); return; }
     u32 lines = 0, words = 0, bytes = 0;
     int in_word = 0;
     for (;;) {
@@ -1979,30 +2096,28 @@ static void cmd_wc(const char *name) {
             u8 c = cat_buf[i];
             bytes++;
             if (c == '\n') lines++;
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') in_word = 0;
+            if (isspace((unsigned char)c)) in_word = 0;
             else if (!in_word) { in_word = 1; words++; }
         }
     }
     sh_close(fd);
-    { char wbuf[48];
-      ksnprintf(wbuf, sizeof(wbuf), "%u lines  %u words  %u bytes\r\n",
+    kprintf("%u lines  %u words  %u bytes\r\n",
                 lines, words, bytes);
-      print_str(wbuf); }
 }
 
 /* ---- cp -------------------------------------------------------- */
 static void cmd_cp(const char *arg) {
     const char *dst = get_arg(arg);
-    if (!dst) { print_str("Usage: cp <src> <dst>\r\n"); return; }
+    if (!dst) { kprintf("Usage: cp <src> <dst>\r\n"); return; }
     char src83[12], dst83[12];
     format_83_name(arg, src83);
     format_83_name(dst, dst83);
 
     i64 fd_in = sh_open(src83);
-    if (fd_in < 0) { print_str("cp: source not found\r\n"); return; }
+    if (fd_in < 0) { kprintf("cp: source not found\r\n"); return; }
     i64 fd_out = sh_open(dst83);
     if (fd_out < 0) fd_out = sh_create(dst83, 0644);
-    if (fd_out < 0) { sh_close(fd_in); print_str("cp: cannot create dest\r\n"); return; }
+    if (fd_out < 0) { sh_close(fd_in); kprintf("cp: cannot create dest\r\n"); return; }
 
     static u8 cp_buf[512];
     u32 total = 0;
@@ -2013,60 +2128,298 @@ static void cmd_cp(const char *arg) {
     }
     sh_close(fd_in);
     sh_close(fd_out);
-    print_str("Copied "); print_size_human(total); print_str("\r\n");
+    kprintf("Copied "); kprintf_size_human(total); kprintf("\r\n");
 }
 
 /* ---- cat / hexdump / touch / rm / rename / write (unchanged) --- */
+
+/* ---- Markdown renderer -----------------------------------------
+ * Renders .md files with VGA colours instead of raw syntax.
+ *
+ * VGA fg colour palette (bg=0 black):
+ *   0x0F white   0x0E yellow  0x0B cyan    0x0A green
+ *   0x09 blue    0x0D magenta 0x07 grey    0x08 dark-grey
+ *
+ * Supported syntax:
+ *   # / ## / ###   headers      (yellow / cyan / green)
+ *   **text**        bold         (bright white on black = 0x0F, already default)
+ *   *text*          italic       (magenta)
+ *   `text`          inline code  (cyan)
+ *   - / * item     bullet       (green dash + white text)
+ *   > text         blockquote   (grey)
+ *   ---            horizontal rule
+ *   blank line     paragraph break
+ ----------------------------------------------------------------- */
+
+/* Emit 'len' chars from 'p' using colour 'attr', then restore default. */
+static void md_puts_col(const char *p, int len, u8 attr) {
+    vga_set_attr(attr);
+    for (int i = 0; i < len; i++) vga_putchar((u8)p[i]);
+    vga_reset_attr();
+}
+
+/* Render one line of markdown inline spans (**bold**, *italic*, `code`).
+ * Called after the line-level prefix (header marker etc.) has been handled. */
+static void md_render_inline(const char *p, int len) {
+    int i = 0;
+    while (i < len) {
+        /* backtick inline code */
+        if (p[i] == '`') {
+            int j = i + 1;
+            while (j < len && p[j] != '`') j++;
+            vga_set_attr(0x0B); /* cyan */
+            for (int k = i + 1; k < j; k++) vga_putchar((u8)p[k]);
+            vga_reset_attr();
+            i = (j < len) ? j + 1 : j;
+            continue;
+        }
+        /* **bold** */
+        if (p[i] == '*' && i + 1 < len && p[i+1] == '*') {
+            int j = i + 2;
+            while (j + 1 < len && !(p[j] == '*' && p[j+1] == '*')) j++;
+            vga_set_attr(0x0F); /* bright white — already default but explicit */
+            for (int k = i + 2; k < j; k++) vga_putchar((u8)p[k]);
+            vga_reset_attr();
+            i = (j + 1 < len) ? j + 2 : len;
+            continue;
+        }
+        /* *italic* */
+        if (p[i] == '*') {
+            int j = i + 1;
+            while (j < len && p[j] != '*') j++;
+            vga_set_attr(0x0D); /* magenta */
+            for (int k = i + 1; k < j; k++) vga_putchar((u8)p[k]);
+            vga_reset_attr();
+            i = (j < len) ? j + 1 : j;
+            continue;
+        }
+        /* plain character */
+        vga_putchar((u8)p[i]);
+        i++;
+    }
+}
+
+static void cmd_mdcat(const char *name) {
+    i64 fd = sh_open(name);
+    if (fd < 0) { kprintf("File not found.\r\n"); return; }
+
+    /* Read whole file into a heap buffer so we can walk lines. */
+    /* We reuse cat_buf for 512-byte chunks and accumulate into a line buf. */
+    static char line[256];
+    int llen = 0;
+
+    for (;;) {
+        i64 n = sh_read(fd, cat_buf, 512);
+        if (n <= 0) break;
+        for (i64 ci = 0; ci < n; ci++) {
+            char c = (char)cat_buf[ci];
+            if (c == '\r') continue;
+            if (c == '\n') {
+                /* process accumulated line */
+                line[llen] = '\0';
+                const char *l = line;
+                int ll = llen;
+                llen = 0;
+
+                /* --- line-level elements --- */
+
+                /* horizontal rule: --- or *** or ___ (at least 3) */
+                if (ll >= 3 && (l[0]=='-'||l[0]=='*'||l[0]=='_')) {
+                    int all = 1;
+                    for (int i = 0; i < ll; i++)
+                        if (l[i] != l[0] && l[i] != ' ') { all = 0; break; }
+                    if (all) {
+                        vga_set_attr(0x08); /* dark grey */
+                        for (int i = 0; i < 80; i++) vga_putchar('-');
+                        vga_reset_attr();
+                        kprintf("\r\n");
+                        continue;
+                    }
+                }
+
+                /* headers ### ## # */
+                if (l[0] == '#') {
+                    int hlvl = 0;
+                    while (hlvl < ll && l[hlvl] == '#') hlvl++;
+                    u8 hcol = (hlvl == 1) ? 0x0E :   /* yellow  H1 */
+                              (hlvl == 2) ? 0x0B :   /* cyan    H2 */
+                                            0x0A;    /* green   H3+ */
+                    const char *htxt = l + hlvl;
+                    int htlen = ll - hlvl;
+                    while (htlen > 0 && htxt[0] == ' ') { htxt++; htlen--; }
+                    vga_set_attr(hcol);
+                    md_render_inline(htxt, htlen);
+                    vga_reset_attr();
+                    kprintf("\r\n");
+                    continue;
+                }
+
+                /* blockquote > */
+                if (l[0] == '>' ) {
+                    vga_set_attr(0x07); /* grey */
+                    vga_putchar('>');
+                    vga_putchar(' ');
+                    int off = (ll > 1 && l[1] == ' ') ? 2 : 1;
+                    md_render_inline(l + off, ll - off);
+                    vga_reset_attr();
+                    kprintf("\r\n");
+                    continue;
+                }
+
+                /* bullet: "- " or "* " (but not "---") */
+                if (ll >= 2 && (l[0] == '-' || l[0] == '*') && l[1] == ' ') {
+                    vga_set_attr(0x0A); /* green bullet */
+                    kprintf("  - ");
+                    vga_reset_attr();
+                    md_render_inline(l + 2, ll - 2);
+                    kprintf("\r\n");
+                    continue;
+                }
+
+                /* blank line */
+                if (ll == 0) { kprintf("\r\n"); continue; }
+
+                /* normal paragraph line — render inline spans */
+                md_render_inline(l, ll);
+                kprintf("\r\n");
+            } else {
+                if (llen < 255) line[llen++] = c;
+            }
+        }
+    }
+    /* flush any remaining line without trailing newline */
+    if (llen > 0) {
+        line[llen] = '\0';
+        md_render_inline(line, llen);
+        kprintf("\r\n");
+    }
+    vga_reset_attr();
+    sh_close(fd);
+}
+
 static void cmd_cat(const char *name) {
-    format_83_name(name, name83);
-    i64 fd = sh_open(name83);
-    if (fd < 0) { print_str("File not found.\r\n"); return; }
+    /* Auto-detect .md / .MD extension and use the markdown renderer */
+    const char *dot = (const char*)0;
+    for (const char *p = name; *p; p++) if (*p == '.') dot = p;
+    if (dot && (
+            (dot[1]=='m'||dot[1]=='M') &&
+            (dot[2]=='d'||dot[2]=='D') &&
+            dot[3]=='\0')) {
+        cmd_mdcat(name);
+        return;
+    }
+    i64 fd = sh_open(name);
+    if (fd < 0) { kprintf("File not found.\r\n"); return; }
     for (;;) {
         i64 n = sh_read(fd, cat_buf, 512);
         if (n <= 0) break;
         cat_buf[n] = 0;
-        print_str((char*)cat_buf);
+        kprintf("%s", (char*)cat_buf);
     }
-    sh_close(fd); print_str("\r\n");
+    sh_close(fd); kprintf("\r\n");
 }
 
 static void cmd_hexdump(const char *name) {
-    format_83_name(name, name83);
-    i64 fd = sh_open(name83);
-    if (fd < 0) { print_str("File not found.\r\n"); return; }
+    i64 fd = sh_open(name);
+    if (fd < 0) { kprintf("File not found.\r\n"); return; }
     int col = 0;
     for (;;) {
         i64 n = sh_read(fd, cat_buf, 512);
         if (n <= 0) break;
         for (i64 i = 0; i < n; i++) {
             print_hex_byte(cat_buf[i]); vga_putchar(' ');
-            if (++col == 16) { col = 0; print_str("\r\n"); }
+            if (++col == 16) { col = 0; kprintf("\r\n"); }
         }
     }
-    if (col) print_str("\r\n");
+    if (col) kprintf("\r\n");
     sh_close(fd);
 }
 
 static void cmd_touch(const char *name) {
-    format_83_name(name, name83);
-    i64 fd = sh_open(name83);
-    if (fd >= 0) { sh_close(fd); print_str("(exists)\r\n"); return; }
-    fd = sh_create(name83, 0644);
+    i64 fd = sh_open(name);
+    if (fd >= 0) { sh_close(fd); return; }
+    fd = sh_create(name, 0644);
     if (fd >= 0) sh_close(fd);
-    print_str("File created.\r\n");
+    kprintf("File created.\r\n");
+}
+
+/* mktxt FILE1 FILE2 FILE3 ...
+ * Creates any number of empty text or markdown files in one command.
+ * Names are space-separated; each is auto-suffixed with .TXT if
+ * no extension is given.  Use .md suffix for markdown files.
+ * All names are uppercased to satisfy FAT32 8.3 rules. */
+static void cmd_mktxt(const char *arg) {
+    if (!arg || !arg[0]) {
+        kprintf("Usage: mktxt <name1> [name2] [name3] ...\r\n");
+        kprintf("  Creates one or more empty text/markdown files.\r\n");
+        kprintf("  No extension = .TXT added automatically.\r\n");
+        kprintf("  Use .md suffix for markdown:  mktxt README.md NOTES.md\r\n");
+        return;
+    }
+
+    int created = 0, skipped = 0;
+    const char *p = arg;
+
+    while (p && *p) {
+        /* skip leading spaces */
+        while (*p == ' ') p++;
+        if (!*p) break;
+
+        /* copy one token into name[] */
+        char name[16];
+        int ni = 0;
+        while (*p && *p != ' ' && ni < 15) name[ni++] = *p++;
+        name[ni] = '\0';
+        if (!ni) continue;
+
+        /* uppercase the whole name */
+        for (int i = 0; i < ni; i++) {
+            if (name[i] >= 'a' && name[i] <= 'z')
+                name[i] = (char)(name[i] - 32);
+        }
+
+        /* auto-append .TXT if there is no dot in the name */
+        int has_dot = 0;
+        for (int i = 0; i < ni; i++) if (name[i] == '.') { has_dot = 1; break; }
+        if (!has_dot && ni <= 8) {
+            /* room for .TXT (4 chars) */
+            name[ni++] = '.';
+            name[ni++] = 'T';
+            name[ni++] = 'X';
+            name[ni++] = 'T';
+            name[ni]   = '\0';
+        }
+
+        /* create only if it doesn't already exist */
+        i64 fd = sh_open(name);
+        if (fd >= 0) {
+            sh_close(fd);
+            kprintf("  skip  %s  (already exists)\r\n", name);
+            skipped++;
+        } else {
+            fd = sh_create(name, 0644);
+            if (fd >= 0) {
+                sh_close(fd);
+                kprintf("  ok    %s\r\n", name);
+                created++;
+            } else {
+                kprintf("  fail  %s\r\n", name);
+            }
+        }
+    }
+    kprintf("%d created, %d skipped.\r\n", created, skipped);
 }
 
 static void cmd_rm(const char *name) {
-    format_83_name(name, name83);
-    if (sh_unlink(name83) == 0)
-        print_str("File deleted.\r\n");
+    if (sh_unlink(name) == 0)
+        kprintf("File deleted.\r\n");
     else
-        print_str("File not found.\r\n");
+        kprintf("File not found.\r\n");
 }
 
 static void cmd_rename(const char *arg) {
     const char *dst = get_arg(arg);
-    if (!dst) { print_str("Usage: rename <old> <new>\r\n"); return; }
+    if (!dst) { kprintf("Usage: rename <old> <new>\r\n"); return; }
     char old83[12], new83[12];
     format_83_name(arg, old83);
     format_83_name(dst, new83);
@@ -2074,19 +2427,19 @@ static void cmd_rename(const char *arg) {
     sh_fullpath(old83, oldp, sizeof(oldp));
     sh_fullpath(new83, newp, sizeof(newp));
     /* Derive dir cluster from path for FAT32 rename */
-    if (fat32_rename_in(old83, new83, cwd_active()) == 0)
-        print_str("Renamed.\r\n");
+    i64 rr = fat32_rename_in(old83, new83, cwd_active());
+    if (rr == 0)
+        kprintf("Renamed.\r\n");
     else
-        print_str("Rename failed.\r\n");
+        kprintf("rename: %s\r\n", strerror((int)rr));
 }
 
 static void cmd_write(const char *arg) {
     const char *text = get_arg(arg);
-    if (!text) { print_str("Usage: write <file> <text>\r\n"); return; }
-    format_83_name(arg, name83);
-    i64 fd = sh_open(name83);
-    if (fd < 0) fd = sh_create(name83, 0644);
-    if (fd < 0) { print_str("Error.\r\n"); return; }
+    if (!text) { kprintf("Usage: write <file> <text>\r\n"); return; }
+    i64 fd = sh_open(arg);
+    if (fd < 0) fd = sh_create(arg, 0644);
+    if (fd < 0) { kprintf("Error.\r\n"); return; }
     usize tlen = strlen(text);
     usize written = 0;
     while (written < tlen) {
@@ -2096,7 +2449,7 @@ static void cmd_write(const char *arg) {
     }
     sh_write(fd, "\r\n", 2);
     sh_close(fd);
-    print_str("Written.\r\n");
+    kprintf("Written.\r\n");
 }
 
 /* ── Dispatch ─────────────────────────────────────────────────── */
@@ -2113,77 +2466,70 @@ static u32 parse_ip(const char *s) {
     return net_make_ip(a,b,c,d);
 }
 
-static void print_int(int v) {
-    char buf[12];
-    ksnprintf(buf, sizeof(buf), "%d", v);
-    print_str(buf);
-}
-
 static void cmd_ifconfig(void) {
-    if (!net_ready) { print_str("eth0: not ready\r\n"); return; }
-    print_str("eth0  MAC=");
+    if (!net_ready) { kprintf("eth0: not ready\r\n"); return; }
+    kprintf("eth0  MAC=");
     for (int i = 0; i < 6; i++) {
         print_hex_byte(net_mac[i]);
-        if (i < 5) print_str(":");
+        if (i < 5) kprintf(":");
     }
-    print_str("\r\n      IP=");
+    kprintf("\r\n      IP=");
     if (net_ip) net_print_ip(net_ip);
-    else print_str("(none)");
-    print_str("  GW=");
+    else kprintf("(none)");
+    kprintf("  GW=");
     if (net_gateway) net_print_ip(net_gateway);
-    else print_str("(none)");
-    print_str("  DNS=10.0.2.3\r\n");
+    else kprintf("(none)");
+    kprintf("  DNS=10.0.2.3\r\n");
 }
 
 static void cmd_ping(const char *arg) {
-    if (!arg) { print_str("Usage: ping <ip or hostname>\r\n"); return; }
-    print_str("Resolving "); print_str(arg); print_str("...\r\n");
+    if (!arg) { kprintf("Usage: ping <ip or hostname>\r\n"); return; }
+    kprintf("Resolving "); kprintf("%s", arg); kprintf("...\r\n");
     u32 ip = net_dns_resolve(arg);
-    if (!ip) { print_str("DNS failed\r\n"); return; }
-    print_str("PING "); net_print_ip(ip); print_str(" ...\r\n");
-    if (net_ping(ip)) print_str("Reply received!\r\n");
-    else              print_str("Request timed out.\r\n");
+    if (!ip) { kprintf("DNS failed\r\n"); return; }
+    kprintf("PING "); net_print_ip(ip); kprintf(" ...\r\n");
+    if (net_ping(ip)) kprintf("Reply received!\r\n");
+    else              kprintf("Request timed out.\r\n");
 }
 
 static void cmd_wget(const char *arg) {
-    if (!arg) { print_str("Usage: wget <ip> <path> <outfile>\r\n"); return; }
+    if (!arg) { kprintf("Usage: wget <ip> <path> <outfile>\r\n"); return; }
 
-    /* split "ip_str path outfile" by spaces using strchr */
+    /* split "ip_str path outfile" by whitespace using strchr + isspace() */
     char ip_s[32] = {0}, path_s[128] = {0}, out_s[16] = {0};
     const char *p1 = strchr(arg, ' ');
-    if (!p1) { print_str("Usage: wget <ip> <path> <outfile>\r\n"); return; }
-    strlcpy(ip_s,   arg,  MIN((usize)(p1 - arg) + 1, sizeof(ip_s)));
-    while (*p1 == ' ') p1++;
+    if (!p1) { kprintf("Usage: wget <ip> <path> <outfile>\r\n"); return; }
+    strlcpy(ip_s, arg, MIN((usize)(p1 - arg) + 1, sizeof(ip_s)));
+    while (isspace((unsigned char)*p1)) p1++;
     const char *p2 = strchr(p1, ' ');
     if (p2) {
         strlcpy(path_s, p1, MIN((usize)(p2 - p1) + 1, sizeof(path_s)));
-        while (*p2 == ' ') p2++;
+        while (isspace((unsigned char)*p2)) p2++;
         strlcpy(out_s,  p2, sizeof(out_s));
     } else {
         strlcpy(path_s, p1, sizeof(path_s));
     }
 
     if (!ip_s[0] || !path_s[0]) {
-        print_str("Usage: wget <ip> <path> <outfile>\r\n"); return;
+        kprintf("Usage: wget <ip> <path> <outfile>\r\n"); return;
     }
-    print_str("Resolving "); print_str(ip_s); print_str("...\r\n");
+    kprintf("Resolving "); kprintf("%s", ip_s); kprintf("...\r\n");
     u32 ip = net_dns_resolve(ip_s);
-    if (!ip) { print_str("DNS failed\r\n"); return; }
-    print_str("Connecting to "); net_print_ip(ip);
-    print_str(path_s); print_str("\r\n");
+    if (!ip) { kprintf("DNS failed\r\n"); return; }
+    kprintf("Connecting to "); net_print_ip(ip);
+    kprintf("%s", path_s); kprintf("\r\n");
     static u8 dl_buf[32768];
     int n = net_http_get(ip, 80, path_s, dl_buf, sizeof(dl_buf));
-    if (n < 0) { print_str("wget: connection failed\r\n"); return; }
-    print_str("Downloaded "); print_int(n); print_str(" bytes\r\n");
+    if (n < 0) { kprintf("wget: connection failed\r\n"); return; }
+    kprintf("Downloaded "); kprintf("%d", (int)(n)); kprintf(" bytes\r\n");
     if (out_s[0]) {
         char name83[12];
-        format_83_name(out_s, name83);
-        i64 fd = sh_open(name83);
-        if (fd < 0) fd = sh_create(name83, 0644);
+        i64 fd = sh_open(out_s);
+        if (fd < 0) fd = sh_create(out_s, 0644);
         if (fd >= 0) {
             sh_write(fd, dl_buf, (usize)n);
             sh_close(fd);
-            print_str("Saved to "); print_str(out_s); print_str("\r\n");
+            kprintf("Saved to "); kprintf("%s", out_s); kprintf("\r\n");
         }
     }
 }
@@ -2191,15 +2537,15 @@ static void cmd_wget(const char *arg) {
 static void cmd_run(const char *name) {
     format_83_name(name, name83);
     i64 fd = sh_open(name83);
-    if (fd < 0) { print_str("File not found.\r\n"); return; }
+    if (fd < 0) { kprintf("File not found.\r\n"); return; }
     void *buf = heap_malloc(524288);
-    if (!buf) { sh_close(fd); print_str("OOM.\r\n"); return; }
+    if (!buf) { sh_close(fd); kprintf("OOM.\r\n"); return; }
     usize total = 0;
     for (;;) { i64 n = sh_read(fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
     sh_close(fd);
     i64 pid = process_create((u64)buf, name);
     heap_free(buf);
-    if (pid < 0) { print_str("Process create failed.\r\n"); return; }
+    if (pid < 0) { kprintf("Process create failed.\r\n"); return; }
     {
         u8 *pp = (u8*)PROC_TABLE;
         for (int i = 0; i < PROC_MAX; i++, pp += PROC_PCB_SIZE) {
@@ -2217,7 +2563,7 @@ static void cmd_run(const char *name) {
 
 /* ── GUI demo command ────────────────────────────────────────── */
 static void cmd_gui(void) {
-    print_str("Launching Retro GUI...\r\n");
+    kprintf("Launching Retro GUI...\r\n");
 
     /* Initialize the GUI system */
     gui_init();
@@ -2230,7 +2576,7 @@ static void cmd_gui(void) {
      * All widget coordinates are in VGA character cells, not pixels.
      */
 
-    print_str("GUI running! Press ESC to exit...\r\n");
+    kprintf("GUI running! Press ESC to exit...\r\n");
 
     /* Drain any stale keyboard/mouse data before entering event loop */
     for (int d = 0; d < 500; d++) {
@@ -2254,7 +2600,8 @@ static void cmd_gui(void) {
     /* Mouse packet state for GUI event loop */
     int  gui_mcycle  = 0;
     u8   gui_mpkt[3];
-    int  lbtn_prev   = 0;   /* previous left-button state for edge detect */
+    int  lbtn_prev   = 0;   /* previous LEFT button state for edge detect */
+    int  rbtn_prev   = 0;   /* previous RIGHT button state for edge detect */
     int  lbtn_curr   = 0;   /* current left-button state for dragging */
 
     for (;;) {
@@ -2290,29 +2637,35 @@ static void cmd_gui(void) {
 
                 if (dx || dy) gui_cursor_move(dx, dy);
 
-                /* Left button state for dragging */
-                lbtn_curr = flags & 0x01;
+                /* Left button state */
+                lbtn_curr = (flags & 0x01) ? 1 : 0;
+                int rbtn_curr = (flags & 0x02) ? 1 : 0;
 
-                /* Left button click (rising edge) */
+                /* Left button press (rising edge) → mouse down */
                 if (lbtn_curr && !lbtn_prev) {
-                    gui_handle_click(-1, -1);
+                    int cx, cy;
+                    gui_cursor_get(&cx, &cy);
+                    gui_handle_mouse_down(cx, cy);
                 }
-                
-                /* Right button click (rising edge) */
-                if ((flags & 0x02) && !(lbtn_prev & 0x02)) {
+
+                /* Left button release (falling edge) → mouse up, stop drag+resize */
+                if (!lbtn_curr && lbtn_prev) {
+                    int cx, cy;
+                    gui_cursor_get(&cx, &cy);
+                    gui_handle_mouse_up(cx, cy);
+                    gui_stop_drag();
+                    gui_stop_resize();
+                }
+
+                /* Right button click (rising edge) — use rbtn_prev, not lbtn_prev */
+                if (rbtn_curr && !rbtn_prev) {
                     int cx, cy;
                     gui_cursor_get(&cx, &cy);
                     gui_handle_right_click(cx, cy);
                 }
 
-                /* Dragging is handled inside gui_cursor_move - no extra call needed */
-
-                /* Button released */
-                if (!lbtn_curr && lbtn_prev) {
-                    gui_stop_drag();
-                }
-
                 lbtn_prev = lbtn_curr;
+                rbtn_prev = rbtn_curr;
 
                 /* Feed input ring buffer */
                 {
@@ -2363,7 +2716,7 @@ static void cmd_gui(void) {
     }
     gui_exit:;
 
-    print_str("Exiting GUI, returning to shell...\r\n");
+    kprintf("Exiting GUI, returning to shell...\r\n");
     gui_shutdown();
 
     /* Restore VGA text mode cursor */
@@ -2376,22 +2729,21 @@ static void cmd_gui(void) {
 static void cmd_elf(const char *name) {
     format_83_name(name, name83);
     i64 fd = sh_open(name83);
-    if (fd < 0) { print_str("File not found.\r\n"); return; }
+    if (fd < 0) { kprintf("File not found.\r\n"); return; }
     void *buf = heap_malloc(524288);
-    if (!buf) { sh_close(fd); print_str("OOM.\r\n"); return; }
+    if (!buf) { sh_close(fd); kprintf("OOM.\r\n"); return; }
     usize total = 0;
     for (;;) { i64 n = sh_read(fd, (u8*)buf + total, 512); if (n <= 0) break; total += (usize)n; }
     sh_close(fd);
     i64 pid = elf_load(buf, total, name);
     heap_free(buf);
-    if (pid < 0) { print_str("Bad ELF.\r\n"); return; }
+    if (pid < 0) { kprintf("Bad ELF.\r\n"); return; }
     process_run((u64)pid);
 }
 
 static void exec_cmd(void) {
-    watchdog_pet();   /* reset counter before executing any command */
-    const char *s = input_buf;
-    while (*s == ' ') s++;
+    /* skip leading whitespace using slibc_ltrim (returns ptr past spaces) */
+    const char *s = slibc_ltrim((char *)input_buf);
     if (!*s) return;
 
 #define CMD(name, body) \
@@ -2400,15 +2752,14 @@ static void exec_cmd(void) {
 
     /* --- system --- */
     CMD("clear",   vga_clear())
-    CMD("reboot",  { print_str("Rebooting...\r\n"); outb(0x64, 0xFE); cli(); hlt(); })
-    CMD("halt",    { print_str("System halted.\r\n"); cli(); hlt(); })
+    CMD("reboot",  { kprintf("Rebooting...\r\n"); outb(0x64, 0xFE); cli(); hlt(); })
+    CMD("halt",    { kprintf("System halted.\r\n"); cli(); hlt(); })
     CMD("ps",      ps_list())
     CMD("meminfo", cmd_meminfo())
     CMD("uptime",  cmd_uptime())
     CMD("uname",   cmd_uname())
-    CMD("sysinfo", cmd_sysinfo())
     CMD("df",      cmd_df())
-    CMD("help",    print_str(
+    CMD("help",    kprintf(
         "Files:\r\n"
         "  ls                   list directory\r\n"
         "  cd <dir>             change directory  (.. goes up)\r\n"
@@ -2423,6 +2774,7 @@ static void exec_cmd(void) {
         "  df                   disk free\r\n"
         "\r\n"
         "  touch <file>         create empty file\r\n"
+        "  mktxt <f1> [f2] ...  create multiple text files at once\r\n"
         "  write <file> <txt>   overwrite file\r\n"
         "  append <file> <txt>  append line to file\r\n"
         "  rm <file>            delete file\r\n"
@@ -2433,36 +2785,41 @@ static void exec_cmd(void) {
         "\r\n"
         "Processes: elf <f>  run <f>  ps\r\n"
         "Network:   ifconfig  ping  wget  serve  netcat\r\n"
-        "System:    meminfo  uname  uptime  sysinfo  df  clear  reboot  halt\r\n"
-        "GUI:       gui                launch retro GUI demo\r\n"
+        "System:    meminfo  uname  uptime  df  clear  reboot  halt\r\n"
+        "Math:      calc <n> <op> <n>     e.g.  calc 6 * 7\r\n"
+        "GUI:       gui                launch retro GUI demo\r\n"\
+        "           photo <f.png>        view PNG image (ESC to return)\r\n"
         "Display:   720p  1080p        switch resolution (while in GUI)\r\n"
-        "           browser            web browser (coming soon)\r\n"))
+        "Network:   lynx <url>        text-mode web browser\r\n"))
 
     /* --- file management --- */
     const char *arg = get_arg(s);
-    CMD("echo",    { if (arg) { print_str(arg); print_str("\r\n"); } else print_str("\r\n"); })
+    CMD("echo",    { if (arg) { kprintf("%s", arg); kprintf("\r\n"); } else kprintf("\r\n"); })
     CMD("ls",      cmd_ls())
-    CMD("pwd",     { print_str(cwd_path); print_str("\r\n"); })
+    CMD("pwd",     { kprintf("%s", cwd_path); kprintf("\r\n"); })
     CMD("cd",      { cmd_cd(arg); })
-    CMD("stat",    { if (arg) cmd_stat(arg);    else print_str("Usage: stat <name>\r\n"); })
-    CMD("cat",     { if (arg) cmd_cat(arg);     else print_str("Usage: cat <file>\r\n"); })
-    CMD("head",    { if (arg) cmd_head(arg);    else print_str("Usage: head <file> [n]\r\n"); })
-    CMD("tail",    { if (arg) cmd_tail(arg);    else print_str("Usage: tail <file> [n]\r\n"); })
-    CMD("hexdump", { if (arg) cmd_hexdump(arg); else print_str("Usage: hexdump <file>\r\n"); })
-    CMD("wc",      { if (arg) cmd_wc(arg);      else print_str("Usage: wc <file>\r\n"); })
+    CMD("stat",    { if (arg) cmd_stat(arg);    else kprintf("Usage: stat <name>\r\n"); })
+    CMD("cat",     { if (arg) cmd_cat(arg);     else kprintf("Usage: cat <file>\r\n"); })
+    CMD("head",    { if (arg) cmd_head(arg);    else kprintf("Usage: head <file> [n]\r\n"); })
+    CMD("tail",    { if (arg) cmd_tail(arg);    else kprintf("Usage: tail <file> [n]\r\n"); })
+    CMD("hexdump", { if (arg) cmd_hexdump(arg); else kprintf("Usage: hexdump <file>\r\n"); })
+    CMD("wc",      { if (arg) cmd_wc(arg);      else kprintf("Usage: wc <file>\r\n"); })
     CMD("find",    { cmd_find(arg); })
-    CMD("touch",   { if (arg) cmd_touch(arg);   else print_str("Usage: touch <file>\r\n"); })
-    CMD("write",   { if (arg) cmd_write(arg);   else print_str("Usage: write <file> <text>\r\n"); })
-    CMD("append",  { if (arg) cmd_append(arg);  else print_str("Usage: append <file> <text>\r\n"); })
-    CMD("rm",      { if (arg) cmd_rm(arg);      else print_str("Usage: rm <file>\r\n"); })
-    CMD("cp",      { if (arg) cmd_cp(arg);      else print_str("Usage: cp <src> <dst>\r\n"); })
-    CMD("rename",  { if (arg) cmd_rename(arg);  else print_str("Usage: rename <old> <new>\r\n"); })
-    CMD("mkdir",   { if (arg) cmd_mkdir(arg);   else print_str("Usage: mkdir <dir>\r\n"); })
-    CMD("rmdir",   { if (arg) cmd_rmdir(arg);   else print_str("Usage: rmdir <dir>\r\n"); })
+    CMD("touch",   { if (arg) cmd_touch(arg);   else kprintf("Usage: touch <file>\r\n"); })
+    CMD("mktxt",   { cmd_mktxt(arg); })
+    CMD("write",   { if (arg) cmd_write(arg);   else kprintf("Usage: write <file> <text>\r\n"); })
+    CMD("append",  { if (arg) cmd_append(arg);  else kprintf("Usage: append <file> <text>\r\n"); })
+    CMD("rm",      { if (arg) cmd_rm(arg);      else kprintf("Usage: rm <file>\r\n"); })
+    CMD("cp",      { if (arg) cmd_cp(arg);      else kprintf("Usage: cp <src> <dst>\r\n"); })
+    CMD("rename",  { if (arg) cmd_rename(arg);  else kprintf("Usage: rename <old> <new>\r\n"); })
+    CMD("mkdir",   { if (arg) cmd_mkdir(arg);   else kprintf("Usage: mkdir <dir>\r\n"); })
+    CMD("rmdir",   { if (arg) cmd_rmdir(arg);   else kprintf("Usage: rmdir <dir>\r\n"); })
 
     /* --- processes --- */
-    CMD("run",     { if (arg) cmd_run(arg);     else print_str("Usage: run <file>\r\n"); })
-    CMD("elf",     { if (arg) cmd_elf(arg);     else print_str("Usage: elf <file>\r\n"); })
+    CMD("run",     { if (arg) cmd_run(arg);     else kprintf("Usage: run <file>\r\n"); })
+    CMD("elf",     { if (arg) cmd_elf(arg);     else kprintf("Usage: elf <file>\r\n"); })
+    CMD("calc",    { cmd_calc(arg); })
+    CMD("photo",   { if (arg) cmd_photo(arg); else kprintf("Usage: photo <file.png>\r\n"); })
 
 #undef CMD
 
@@ -2472,28 +2829,22 @@ static void exec_cmd(void) {
 
     /* Resolution switching */
     if (strncmp(s, "720p", 4)==0 && (s[4]==' '||s[4]==0)) {
-        if (!fb_is_enabled()) { print_str("GUI not active. Run 'gui' first.\r\n"); return; }
+        if (!fb_is_enabled()) { kprintf("GUI not active. Run 'gui' first.\r\n"); return; }
         if (fb_set_resolution(1280, 720))
-            print_str("Resolution set to 1280x720 (720p).\r\n");
+            kprintf("Resolution set to 1280x720 (720p).\r\n");
         else
-            print_str("720p not supported by display.\r\n");
+            kprintf("720p not supported by display.\r\n");
         return;
     }
     if (strncmp(s, "1080p", 5)==0 && (s[5]==' '||s[5]==0)) {
-        if (!fb_is_enabled()) { print_str("GUI not active. Run 'gui' first.\r\n"); return; }
+        if (!fb_is_enabled()) { kprintf("GUI not active. Run 'gui' first.\r\n"); return; }
         if (fb_set_resolution(1920, 1080))
-            print_str("Resolution set to 1920x1080 (1080p).\r\n");
+            kprintf("Resolution set to 1920x1080 (1080p).\r\n");
         else
-            print_str("1080p not supported by display.\r\n");
+            kprintf("1080p not supported by display.\r\n");
         return;
     }
 
-    /* Browser (future feature) */
-    if (strncmp(s, "browser", 7)==0 && (s[7]==' '||s[7]==0)) {
-        print_str("Browser: not yet implemented.\r\n");
-        print_str("Run 'gui' first, then use browser from GUI when available.\r\n");
-        return;
-    }
     if (strncmp(s, "ping",     4)==0 && (s[4]==' '||s[4]==0)) { cmd_ping(arg);  return; }
     if (strncmp(s, "wget",     4)==0 && (s[4]==' '||s[4]==0)) { cmd_wget(arg);  return; }
     if (strncmp(s, "serve",    5)==0 && (s[5]==' '||s[5]==0)) {
@@ -2504,18 +2855,18 @@ static void exec_cmd(void) {
     if (strncmp(s, "netcat", 6)==0 && (s[6]==' '||s[6]==0)) {
         u16 port = 4444;
         if (arg) { port = 0; for (const char *p=arg; *p>='0'&&*p<='9'; p++) port=(u16)(port*10+(*p-'0')); }
-        if (!net_tcp_listen(port)) { print_str("netcat: bind failed\r\n"); return; }
-        { char pb[40]; ksnprintf(pb, sizeof(pb), "netcat: waiting on port %u (any key to cancel)\r\n", (unsigned)port); print_str(pb); }
+        if (!net_tcp_listen(port)) { kprintf("netcat: bind failed\r\n"); return; }
+        kprintf("netcat: waiting on port %u (any key to cancel)\r\n", (unsigned)port);
         TcpConn *c = NULL;
         for (;;) { net_poll(); if (inb(0x64)&1){inb(0x60);net_tcp_unlisten(port);return;} c=net_tcp_accept_nb(port); if(c) break; for(volatile int _d=0;_d<5000;_d++) __asm__ volatile("pause"); }
-        print_str("netcat: connected\r\n");
+        kprintf("netcat: connected\r\n");
         static u8 nc_buf[512];
-        for (;;) { int n=net_tcp_recv(c,nc_buf,sizeof(nc_buf)-1); if(n<=0) break; nc_buf[n]=0; print_str((char*)nc_buf); if(inb(0x64)&1){inb(0x60);break;} }
+        for (;;) { int n=net_tcp_recv(c,nc_buf,sizeof(nc_buf)-1); if(n<=0) break; nc_buf[n]=0; kprintf("%s", (char*)nc_buf); if(inb(0x64)&1){inb(0x60);break;} }
         net_tcp_close(c); net_tcp_unlisten(port);
-        print_str("\r\nnetcat: done.\r\n"); return;
+        kprintf("\r\nnetcat: done.\r\n"); return;
     }
 
-    print_str("Unknown command. Try 'help'.\r\n");
+    kprintf("Unknown command. Try 'help'.\r\n");
 }
 
 /* ================================================================
@@ -2539,24 +2890,19 @@ void kernel_main(void) {
     process_init();
     scheduler_init();
 
-    /* ── Splash screen: 3 s animated boot banner ────────────── */
-    vga_splash();
-    vga_clear();
-
     vfs_init();
-    ata_init();        /* reset + DRDY-wait before any disk access */
     fat32_init();
     vfs_core_init();       /* zero inode/mount/fd tables for new VFS layer */
     jfs_init();            /* init JFS on second partition */
     vfs_register_fat32();  /* mount FAT32 at /    via inode_ops_t */
     vfs_register_jfs();    /* mount JFS   at /jfs via inode_ops_t */
+    net_start();          /* init e1000, run DHCP */
 
-    pci_scan_all();           /* enumerate all PCI devices — MUST come before net/AHCI/NVMe */
-
-    net_start();          /* init e1000 (requires PCI scan to have run first) */
-
-    /* Drain any stale i8042 bytes that accumulated during network init. */
+    /* Drain any stale i8042 bytes that accumulated during network init.
+     * Without this, DHCP broadcast packets can cause phantom keypresses. */
     { int t = 1000; while ((inb(0x64) & 1) && --t) inb(0x60); }
+
+    pci_scan_all();           /* enumerate all PCI devices — must run first */
 
     /* ── AHCI SATA (class 0x01, subclass 0x06, prog-if 0x01) ── */
     {
@@ -2565,7 +2911,7 @@ void kernel_main(void) {
             u32 bar5 = (u32)pci_bar_base(ahci_dev, 5);
             ahci_init(bar5);
         } else {
-            print_str("[AHCI] no SATA controller found\r\n");
+            kprintf("[AHCI] no SATA controller found\r\n");
         }
     }
 
@@ -2576,7 +2922,7 @@ void kernel_main(void) {
             u64 bar0 = pci_bar_base(nvme_dev, 0);
             nvme_init(bar0);
         } else {
-            print_str("[NVMe] no NVMe controller found\r\n");
+            kprintf("[NVMe] no NVMe controller found\r\n");
         }
     }
 
@@ -2590,24 +2936,15 @@ void kernel_main(void) {
     smp_init();
     watchdog_init();
 
-    print_str("========================================\r\n");
-    print_str("  Systrix v0.1\r\n");
-    print_str("  x86-64 | preemptive | FAT32 | ring-3\r\n");
-    print_str("  Type 'help' for available commands.\r\n");
-    print_str("  Type 'gui'  to launch the GUI desktop.\r\n");
-    print_str("  Type 'sysinfo' to verify framebuffer.\r\n");
-    print_str("========================================\r\n");
+    kprintf("========================================\r\n  Systrix v0.1\r\n  x86-64 | preemptive | FAT32 | ring-3\r\n  Type 'help' for available commands.\r\n========================================\r\n");
 
     for (;;) {
-        watchdog_pet();
-        net_poll();                  /* drain any pending RX frames */
-        print_str("systrix:");
-        print_str(cwd_path);
-        print_str("$ ");
-        watchdog_suspend();          /* waiting for human input — never a hang */
+        watchdog_pet();   /* kernel idle/shell is alive */
+        kprintf("systrix:");
+        kprintf("%s", cwd_path);
+        kprintf("$ ");
         read_line(input_buf, sizeof(input_buf));
-        watchdog_resume();           /* back to kernel work — re-arm watchdog */
+        watchdog_pet();   /* pet again after potentially long input wait */
         exec_cmd();
-        watchdog_pet();              /* command completed — reset counter */
     }
 }
