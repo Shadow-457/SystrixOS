@@ -510,6 +510,7 @@ void print_hex_byte(u8 v);
 /* kernel.c  – ATA */
 void ata_read_sector(u32 lba, void *buf);
 void ata_write_sector(u32 lba, const void *buf);
+void disk_use_ahci(void);   /* switch disk backend to AHCI port 0 */
 
 /* kernel.c  – FAT32 / VFS */
 void vfs_init(void);
@@ -948,7 +949,7 @@ void pci_set_ecam(u64 base, u8 start_bus);
 
 /* AHCI */
 /* ── AHCI SATA driver (ahci.c) ─────────────────────────────── */
-void        ahci_init(u32 bar);
+void        ahci_init(u64 bar);
 i64         ahci_read_sector(int port, u32 lba, void *buf);
 i64         ahci_read_sectors(int port, u64 lba, u16 count, void *buf);
 i64         ahci_write_sector(int port, u32 lba, const void *buf);

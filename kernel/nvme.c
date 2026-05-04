@@ -172,7 +172,15 @@ static void *alloc_aligned(usize sz, usize align){
 /* ── nvme_init ───────────────────────────────────────────────── */
 void nvme_init(u64 bar){
     if(!bar){ print_str("[NVMe] no BAR0\r\n"); return; }
-    g_nvme.bar=(u8*)(usize)bar;
+
+    /* Identity-map the NVMe BAR0 MMIO region (64KB: regs + doorbell page).
+     * Without this the first MMIO read (CAP register) faults.            */
+    u64 nvme_phys = bar & ~0xFull;
+    for(u64 off = 0; off < 0x10000; off += PAGE_SIZE)
+        vmm_map(read_cr3(), nvme_phys + off, nvme_phys + off,
+                PTE_PRESENT | PTE_WRITE | PTE_NX);
+
+    g_nvme.bar=(u8*)(usize)nvme_phys;
     g_nvme.ready=0;
 
     /* ── 1. Read capabilities ── */

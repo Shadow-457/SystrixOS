@@ -160,6 +160,23 @@ USB_TEST = -device qemu-xhci,id=xhci0 \
            -device usb-storage,bus=xhci0.0,drive=usbstick
 AUDIO = -device sb16,audiodev=snd0 -audiodev sdl,id=snd0
 
+# ── Storage controller options ────────────────────────────────────
+# AHCI/SATA: Intel ICH9 AHCI controller (PCI class 01:06:01).
+# The boot image is attached as the SATA drive so AHCI sees it.
+SATA = -device ich9-ahci,id=ahci0 \
+       -drive if=none,id=satadisk,file=systrix.img,format=raw \
+       -device ide-hd,bus=ahci0.0,drive=satadisk
+
+# NVMe: NVMe controller (PCI class 01:08:02).
+# A separate 64M disk image is used as the NVMe volume.
+NVME = -device nvme,serial=SYSTRIXNVME0,drive=nvmedisk \
+       -drive if=none,id=nvmedisk,file=nvme_test.img,format=raw
+
+nvme_test.img:
+	dd if=/dev/zero of=nvme_test.img bs=1M count=64 status=none
+	mkfs.fat -F 32 -n NVMETEST nvme_test.img
+	@echo "Created nvme_test.img (64M FAT32 NVMe image)"
+
 usb_test.img:
 	dd if=/dev/zero of=usb_test.img bs=1M count=64 status=none
 	mkfs.fat -F 32 -n USBTEST usb_test.img
@@ -168,45 +185,73 @@ usb_test.img:
 	@echo "Created usb_test.img (16M FAT32 flash drive image)"
 
 run: systrix.img
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	$(QEMU) -machine pc,accel=tcg \
 	        -m 512M -no-reboot \
-	        -machine pc,accel=tcg \
+	        $(SATA) \
+	        $(DISP) $(USBHID) \
+	        $(NIC) \
+	        $(AUDIO)
+
+# run-sata: boot via AHCI SATA controller (AHCI visible in OS)
+run-sata: systrix.img
+	$(QEMU) -machine pc,accel=tcg \
+	        -m 512M -no-reboot \
+	        $(SATA) \
+	        $(DISP) $(USBHID) \
+	        $(NIC) \
+	        $(AUDIO)
+
+# run-nvme: boot via IDE + attach NVMe volume (NVMe visible in OS)
+run-nvme: systrix.img nvme_test.img
+	$(QEMU) -machine pc,accel=tcg \
+	        -m 512M -no-reboot \
+	        -drive format=raw,file=systrix.img,if=ide \
+	        $(NVME) \
+	        $(DISP) $(USBHID) \
+	        $(NIC) \
+	        $(AUDIO)
+
+# run-both: AHCI SATA boot drive + NVMe secondary volume
+run-both: systrix.img nvme_test.img
+	$(QEMU) -machine pc,accel=tcg \
+	        -m 512M -no-reboot \
+	        $(SATA) \
+	        $(NVME) \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO)
 
 run-usb: systrix.img usb_test.img
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	$(QEMU) -machine pc,accel=tcg \
 	        -m 512M -no-reboot \
-	        -machine pc,accel=tcg \
+	        $(SATA) \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
 	        $(USB_TEST)
 
 run-quiet: systrix.img
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	$(QEMU) -machine pc,accel=tcg \
 	        -m 512M -no-reboot \
-	        -machine pc,accel=tcg \
+	        $(SATA) \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
 	        -display gtk
 
 run-sdl: systrix.img
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	$(QEMU) -machine pc,accel=tcg \
 	        -m 512M -no-reboot \
-	        -machine pc,accel=tcg \
+	        $(SATA) \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
 	        -display sdl
 
-# Day 1: debug target — serial log to qemu.log, all output to terminal
 run-debug: systrix.img
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	$(QEMU) -machine pc,accel=tcg \
 	        -m 512M -no-reboot \
-	        -machine pc,accel=tcg \
+	        $(SATA) \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
@@ -214,9 +259,9 @@ run-debug: systrix.img
 	        -d guest_errors,unimp 2>>qemu.log || true
 
 run-nographic: systrix.img
-	$(QEMU) -drive format=raw,file=systrix.img,if=ide \
+	$(QEMU) -machine pc,accel=tcg \
 	        -m 512M -no-reboot \
-	        -machine pc,accel=tcg \
+	        $(SATA) \
 	        $(DISP) $(USBHID) \
 	        $(NIC) \
 	        $(AUDIO) \
@@ -327,13 +372,13 @@ compiler: systrix.img SHC
 # -- Clean ---------------------------------------------------------
 clean:
 	rm -f boot/boot.o kernel/*.o kernel/entry.o kernel/isr.o boot_elf.tmp
-	rm -f boot.bin kernel.bin fat32.img systrix.img
+	rm -f boot.bin kernel.bin fat32.img systrix.img nvme_test.img
 	rm -f user/crt0.o user/hello.o user/myprogram.o user/shc.o user/libc.o user/echo_server.o user/echo_client.o browser/browser.o
 	rm -f HELLO_C MYPROGRAM SHC ECHO_SRV ECHO_CLI BROWSER
 	rm -f qemu.log /tmp/README.TXT
 	rm -f kernel/fbdev.o kernel/gui.o
 
-.PHONY: all run run-quiet run-sdl run-debug run-nographic hello myprog shc addshc addshadow compiler programs addprog clean
+.PHONY: all run run-sata run-nvme run-both run-quiet run-sdl run-debug run-nographic run-usb hello myprog shc addshc addshadow compiler programs addprog clean
 
 # -- IPC echo server/client (microkernel demo) ---------------------
 user/echo_server.o: user/echo_server.c user/ipc.h

@@ -218,9 +218,18 @@ static void parse_identify(Port *pt, u16 *data){
 }
 
 /* ── ahci_init ────────────────────────────────────────────────── */
-void ahci_init(u32 bar){
+void ahci_init(u64 bar){
     if(!bar) return;
-    g_hba=(u8*)(usize)(bar&~0xFu);
+    u64 hba_phys = bar & ~0xFull;
+
+    /* Identity-map the AHCI HBA MMIO region (16KB covers all 32 ports).
+     * Without this the first MMIO read faults — the region is above 4GB
+     * in some VMs and was never mapped by the early boot identity map.  */
+    for(u64 off = 0; off < 0x4000; off += PAGE_SIZE)
+        vmm_map(read_cr3(), hba_phys + off, hba_phys + off,
+                PTE_PRESENT | PTE_WRITE | PTE_NX);
+
+    g_hba=(u8*)(usize)hba_phys;
 
     hba_w(HBA_GHC, hba_r(HBA_GHC)|HBA_GHC_AE);
     hba_w(HBA_GHC, hba_r(HBA_GHC)|HBA_GHC_HR);

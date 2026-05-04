@@ -302,8 +302,28 @@ void print_hex_byte(u8 v) {
 /* ================================================================
  *  ATA PIO (28-bit LBA, primary channel 0x1F0)
  * ================================================================ */
-void ata_read_sector(u32 lba, void *buf) {
-    /* FIX (Bug 7): bounded poll — if disk absent this returns zeroes */
+/* ================================================================
+ *  Disk abstraction layer
+ *
+ *  Priority: AHCI port 0 → legacy ATA PIO (0x1F0)
+ *
+ *  All FAT32/JFS/VFS code calls ata_read_sector / ata_write_sector.
+ *  These wrappers transparently route to whichever backend is active
+ *  so the filesystem works identically whether the disk is SATA/AHCI
+ *  (make run / make run-sata) or legacy IDE (if=ide).
+ *
+ *  disk_backend is set to DISK_AHCI in kernel_main() after ahci_init()
+ *  succeeds, otherwise it stays DISK_ATA_PIO.
+ * ================================================================ */
+#define DISK_ATA_PIO 0
+#define DISK_AHCI    1
+static int disk_backend = DISK_ATA_PIO;   /* default: legacy PIO */
+
+/* Called from kernel_main() once AHCI is confirmed working. */
+void disk_use_ahci(void) { disk_backend = DISK_AHCI; }
+
+/* ── Legacy ATA PIO (28-bit LBA, primary channel 0x1F0) ─────── */
+static void ata_pio_read(u32 lba, void *buf) {
     watchdog_suspend();
     u32 timeout = 0x100000;
     while ((inb(ATA_STATUS) & 0x80) && --timeout) {}
@@ -322,7 +342,7 @@ void ata_read_sector(u32 lba, void *buf) {
     watchdog_resume();
 }
 
-void ata_write_sector(u32 lba, const void *buf) {
+static void ata_pio_write(u32 lba, const void *buf) {
     u32 timeout = 0x100000;
     while ((inb(ATA_STATUS) & 0x80) && --timeout) {}
     if (!timeout) return;
@@ -338,6 +358,22 @@ void ata_write_sector(u32 lba, const void *buf) {
     const u16 *p = (const u16*)buf;
     for (int i = 0; i < 256; i++) outw(ATA_DATA, p[i]);
     outb(ATA_CMD, ATA_CMD_FLUSH);
+}
+
+/* ── Public disk API — used by all FAT32/VFS code ───────────── */
+void ata_read_sector(u32 lba, void *buf) {
+    if (disk_backend == DISK_AHCI) {
+        /* AHCI port 0 is the boot drive. Fall back to PIO on error. */
+        if (ahci_read_sector(0, lba, buf) == 0) return;
+    }
+    ata_pio_read(lba, buf);
+}
+
+void ata_write_sector(u32 lba, const void *buf) {
+    if (disk_backend == DISK_AHCI) {
+        if (ahci_write_sector(0, lba, buf) == 0) return;
+    }
+    ata_pio_write(lba, buf);
 }
 
 /* ================================================================
@@ -2551,40 +2587,75 @@ void kernel_main(void) {
     scheduler_init();
 
     vfs_init();
-    fat32_init();
+    /* NOTE: fat32_init() and VFS mounts happen AFTER AHCI/PCI init below,
+     * so the disk abstraction layer has been configured to the right backend
+     * before we read the BPB.  Only vfs_init() (which zeroes tables) runs here. */
+
     vfs_core_init();       /* zero inode/mount/fd tables for new VFS layer */
-    jfs_init();            /* init JFS on second partition */
-    vfs_register_fat32();  /* mount FAT32 at /    via inode_ops_t */
-    vfs_register_jfs();    /* mount JFS   at /jfs via inode_ops_t */
-    net_start();          /* init e1000, run DHCP */
+
+    pci_scan_all();           /* enumerate all PCI devices — must run before any driver */
+
+    net_start();          /* init e1000 (needs PCI scan), configure IP */
 
     /* Drain any stale i8042 bytes that accumulated during network init.
      * Without this, DHCP broadcast packets can cause phantom keypresses. */
     { int t = 1000; while ((inb(0x64) & 1) && --t) inb(0x60); }
 
-    pci_scan_all();           /* enumerate all PCI devices — must run first */
-
-    /* ── AHCI SATA (class 0x01, subclass 0x06, prog-if 0x01) ── */
+    /* ── AHCI SATA (class 0x01, subclass 0x06) ── */
+    /* Try strict prog-if 0x01 first; fall back to any subclass-0x06 device
+     * (some QEMU/VirtualBox builds expose AHCI with prog-if 0x00).         */
     {
         void *ahci_dev = pci_find_class_progif(0x01, 0x06, 0x01);
+        if (!ahci_dev) ahci_dev = pci_find_class(0x01, 0x06);
         if (ahci_dev) {
-            u32 bar5 = (u32)pci_bar_base(ahci_dev, 5);
-            ahci_init(bar5);
+            pci_power_on(ahci_dev);          /* wake from D3 if sleeping   */
+            pci_enable_device(ahci_dev);     /* enable MMIO + I/O decoding */
+            pci_enable_bus_master(ahci_dev); /* allow DMA                  */
+            u64 bar5 = pci_bar_base(ahci_dev, 5);
+            if (!bar5) bar5 = pci_bar_base(ahci_dev, 0); /* fallback BAR0  */
+            if (bar5) {
+                ahci_init(bar5);
+                if (ahci_get_port_count() > 0) {
+                    disk_use_ahci();   /* switch all disk I/O to AHCI port 0 */
+                    print_str("[disk] using AHCI backend\r\n");
+                }
+            } else {
+                print_str("[AHCI] SATA controller found but BAR invalid\r\n");
+            }
         } else {
             print_str("[AHCI] no SATA controller found\r\n");
         }
     }
 
     /* ── NVMe (class 0x01, subclass 0x08, prog-if 0x02) ── */
+    /* Try strict prog-if 0x02 first; fall back to any subclass-0x08 device
+     * (some hypervisors advertise NVMe with prog-if 0x00).                 */
     {
         void *nvme_dev = pci_find_class_progif(0x01, 0x08, 0x02);
+        if (!nvme_dev) nvme_dev = pci_find_class(0x01, 0x08);
         if (nvme_dev) {
+            pci_power_on(nvme_dev);          /* wake from D3 if sleeping   */
+            pci_enable_device(nvme_dev);     /* enable MMIO decoding       */
+            pci_enable_bus_master(nvme_dev); /* allow DMA                  */
             u64 bar0 = pci_bar_base(nvme_dev, 0);
-            nvme_init(bar0);
+            if (bar0) {
+                nvme_init(bar0);
+            } else {
+                print_str("[NVMe] NVMe controller found but BAR invalid\r\n");
+            }
         } else {
             print_str("[NVMe] no NVMe controller found\r\n");
         }
     }
+
+    /* ── Mount filesystems now that the disk backend is configured ── */
+    /* fat32_init() reads the BPB via ata_read_sector(), which now routes
+     * to AHCI (if disk_use_ahci() was called above) or falls back to ATA
+     * PIO.  Either way the correct sectors are read.                   */
+    fat32_init();
+    jfs_init();
+    vfs_register_fat32();  /* mount FAT32 at /    via inode_ops_t */
+    vfs_register_jfs();    /* mount JFS   at /jfs via inode_ops_t */
 
     ps2_init();               /* full i8042 controller init — KB + mouse */
     kbd_init_dummy();         /* polled I/O — no keyboard init needed */
