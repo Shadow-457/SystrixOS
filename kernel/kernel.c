@@ -493,11 +493,17 @@ void kprintf(const char *fmt, ...)
             break;
         }
         case 'x': case 'X': case 'p': {
-            u64 v = (p == 'p' || lng >= 2) ? (u64)__builtin_va_arg(ap, void *)
+            int is_ptr = (*p == 'p');
+            u64 v = (is_ptr || lng >= 2) ? (u64)__builtin_va_arg(ap, void *)
                     : (lng == 1) ? (u64)__builtin_va_arg(ap, unsigned long)
                                  : (u64)__builtin_va_arg(ap, unsigned int);
-            if (p == 'p') { vga_putchar('0'); vga_putchar('x'); kput_num(v, 16, 0, 16, 1, 0); }
-            else kput_num(v, 16, *p == 'X', width, zero, 0);
+            if (is_ptr) {
+                vga_putchar('0');
+                vga_putchar('x');
+                kput_num(v, 16, 0, 16, 1, 0);
+            } else {
+                kput_num(v, 16, *p == 'X', width, zero, 0);
+            }
             break;
         }
         case 's': {
@@ -3280,6 +3286,23 @@ void kernel_main(void)
     outb(0x3D4, 0x0B); outb(0x3D5, (inb(0x3D5) & 0xE0) | 15);
     vga_clear();
     serial_init();
+
+    /* Canary check: the MBR places this pattern immediately after the
+     * last byte of the loaded kernel image.  If it is missing, the
+     * bootloader did not fetch the whole image, which means .data (and
+     * possibly part of .text) is reading as zeros.  That failure is
+     * silent otherwise — the kernel runs, but every statically
+     * initialised variable reads as 0. */
+    {
+        extern volatile u32 kernel_load_canary;
+        if (kernel_load_canary != 0x4C4F4144u) {   /* "LOAD" */
+            kprintf("[FATAL] kernel image truncated: canary is 0x%08x, expected 0x4c4f4144\r\n",
+                    kernel_load_canary);
+            kprintf("        bootloader loaded only part of the %u-sector window.\r\n",
+                    (u32)KERNEL_LOAD_SECTORS);
+            for (;;) __asm__ volatile("hlt");
+        }
+    }
 
     /* Initialise kernel subsystems in dependency order. */
     heap_init();

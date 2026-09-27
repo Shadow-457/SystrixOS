@@ -25,7 +25,7 @@ SECTION_RE = re.compile(r"^(\.\S+)\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s*$")
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         print(__doc__)
         return 2
 
@@ -50,6 +50,22 @@ def main() -> int:
     used = end - load_addr
     pct = 100.0 * used / (max_sectors * 512)
 
+    # The canary is emitted by linker.ld at the end of .data; read its
+    # real address back out of the map rather than guessing it.
+    canary = None
+    with open(map_path) as f:
+        for line in f:
+            # ld lists the linker-script-defined symbol as
+            # "<addr>  kernel_load_canary = ." — the trailing "= ." is
+            # part of the expression, not noise to be anchored away.
+            m = re.match(r"^\s+(0x[0-9a-f]+)\s+kernel_load_canary\b", line)
+            if m:
+                canary = int(m.group(1), 16)
+                break
+    if canary is None:
+        print("check_kernel_fit: kernel_load_canary not found in the map")
+        return 2
+
     print(
         "kernel init: 0x%08x..0x%08x  (%d KiB, %.0f%% of the %d KiB load window)"
         % (load_addr, end, used // 1024, pct, max_sectors // 2)
@@ -64,6 +80,24 @@ def main() -> int:
         print("       Raise KERNEL_BLOCKS in both boot/boot.S and the Makefile")
         print("       (they must stay in sync) until it fits.")
         return 1
+
+    if canary + 4 != end:
+        print("")
+        print("ERROR: the load canary at 0x%08x is not the last word of the" % canary)
+        print("       initialised image, which ends at 0x%08x." % end)
+        print("       It has to be the *first* thing a too-short loader")
+        print("       fails to fetch, or kernel_main's check passes vacuously.")
+        return 1
+    if end > limit:
+        print("")
+        print("ERROR: kernel initialised data overruns the bootloader load window")
+        print("       (ends at 0x%08x, window ends at 0x%08x)." % (end, limit))
+        print("       Raise KERNEL_BLOCKS in both boot/boot.S and the Makefile")
+        print("       (they must stay in sync) until it fits.")
+        return 1
+
+    print("  canary  at 0x%08x, last word of the image, %d KiB of headroom"
+          % (canary, (limit - end) // 1024))
     return 0
 
 

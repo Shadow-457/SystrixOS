@@ -2,16 +2,24 @@
 #  Systrix OS — Stage 1 Bootloader (512 bytes, MBR)
 #
 #  Uses INT 13h AH=42h (LBA extensions) — no 127-sector limit.
-#  Five 128-sector reads cover LBA 1..640 (320 KiB) from physical
-#  0x8000.  tools/check_kernel_fit.py enforces that the kernel's
-#  initialised sections stay inside that window.
+#  Reads KERNEL_BLOCKS * 128 sectors from LBA 1 to physical 0x8000.
+#
+#  128 sectors is 64 KiB, so block i belongs at 0x8000 + i*0x10000.
+#  With a fixed destination offset of 0x8000 that puts the destination
+#  segment at i*0x1000 (because segment * 16 is the linear address).
+#
+#  tools/check_kernel_fit.py fails the build if the kernel's
+#  initialised sections ever grow past this window, and the kernel
+#  verifies a canary at the end of the loaded image on entry.
 # ================================================================
 .code16
 .intel_syntax noprefix
 
+.set KERNEL_BLOCKS, 8          /* 8 * 128 sectors = 512 KiB */
+
 .globl _start
 _start:
-    # Save drive ID in memory before anything clobbers dl/bx
+    # Save drive ID before anything clobbers dl/bx
     xor  ax, ax
     mov  ds, ax
     mov  es, ax
@@ -27,82 +35,42 @@ _start:
     mov  bx, 0x55AA
     mov  dl, byte ptr [drive_save]
     int  0x13
-    jnc  .do_lba          # carry clear = LBA supported
-    # LBA not supported — fatal, we need it
-    jmp  .disk_err
+    jnc .do_lba          # carry clear = LBA supported
+    jmp .disk_err        # LBA not supported — fatal, we need it
 
 .do_lba:
     # ── Load the kernel ────────────────────────────────────────────
-    # 128 sectors (64 KiB) per read, from LBA 1 upwards into physical
-    # 0x8000.  Five reads cover 0x8000..0x57FFF = 320 KiB, comfortably
-    # more than the kernel's initialised footprint; the Makefile fails
-    # the build if it ever outgrows that.
+    # Loading all of .text, .rodata *and .data* matters.  Stopping
+    # short left .data reading back as zeroes, which is silent: the
+    # kernel runs, but every statically initialised variable (GUI
+    # repaint flags, RNG seeds, lookup tables) reads as 0, so features
+    # appear to work while doing nothing.
     #
-    # Loading all of .text, .rodata *and .data* matters.  Stopping after
-    # the first 256 KiB left .data reading back as zeroes, which is
-    # silent: the kernel runs, but every statically initialised variable
-    # (GUI repaint flags, RNG seeds, lookup tables) reads as 0, so
-    # features appear to work while doing nothing.
-    #
-    # The destination segment advances by 0x1000 per read because
-    # 0x1000 * 16 = 0x10000 = 128 sectors * 512 bytes:
-    #   LBA    1..128  ->  0:8000  (phys 0x008000)
-    #   LBA  129..256  -> 1000:8000 (phys 0x018000)
-    #   LBA  257..384  -> 2000:8000 (phys 0x028000)
-    #   LBA  385..512  -> 3000:8000 (phys 0x038000)
-    #   LBA  513..640  -> 4000:8000 (phys 0x048000)
-    #
-    # The MBR lives at 0x7C00 with the stack starting there and growing
-    # down, so the 0x7Cxx variables below are never clobbered by these
-    # transfers (which all begin at 0x8000 or above).
-
-    # --- LBA 1..128 -> 0x0000:0x8000 ---
-    mov  word ptr [dap_count],   128
+    # The MBR lives at 0x7C00 and the stack starts there growing down,
+    # so the variables at 0x7Cxx are never touched by these transfers
+    # (which all land at 0x8000 or above).
+    mov  word ptr [blk], 0
+.load_blk:
+    movzx eax, word ptr [blk]
+    shl  eax, 12                     # i * 0x1000
+    mov  [dap_buf_seg], ax
     mov  word ptr [dap_buf_off], 0x8000
-    mov  word ptr [dap_buf_seg], 0x0000
-    mov  dword ptr [dap_lba_lo], 1
+
+    movzx eax, word ptr [blk]
+    inc  eax
+    mov  [dap_lba_lo], eax           # source LBA = block + 1
     mov  dword ptr [dap_lba_hi], 0
-    lea  si, [dap]
+
+    mov  word ptr [dap_count], 128
+    lea  si, [dap]                   # reloaded every pass: INT 13h may clobber si
     mov  ah, 0x42
     mov  dl, byte ptr [drive_save]
     int  0x13
     jc   .disk_err
 
-    # --- LBA 129..256 -> 0x1000:0x8000 ---
-    mov  word ptr [dap_buf_seg], 0x1000
-    mov  dword ptr [dap_lba_lo], 129
-    lea  si, [dap]
-    mov  ah, 0x42
-    mov  dl, byte ptr [drive_save]
-    int  0x13
-    jc   .disk_err
-
-    # --- LBA 257..384 -> 0x2000:0x8000 ---
-    mov  word ptr [dap_buf_seg], 0x2000
-    mov  dword ptr [dap_lba_lo], 257
-    lea  si, [dap]
-    mov  ah, 0x42
-    mov  dl, byte ptr [drive_save]
-    int  0x13
-    jc   .disk_err
-
-    # --- LBA 385..512 -> 0x3000:0x8000 ---
-    mov  word ptr [dap_buf_seg], 0x3000
-    mov  dword ptr [dap_lba_lo], 385
-    lea  si, [dap]
-    mov  ah, 0x42
-    mov  dl, byte ptr [drive_save]
-    int  0x13
-    jc   .disk_err
-
-    # --- LBA 513..640 -> 0x4000:0x8000 ---
-    mov  word ptr [dap_buf_seg], 0x4000
-    mov  dword ptr [dap_lba_lo], 513
-    lea  si, [dap]
-    mov  ah, 0x42
-    mov  dl, byte ptr [drive_save]
-    int  0x13
-    jc   .disk_err
+    inc  word ptr [blk]
+    cmp  word ptr [blk], KERNEL_BLOCKS
+    jb   .load_blk
 
 .done:
     # ── Query E820 memory map → store at 0x0500 ──────────────────
@@ -140,7 +108,6 @@ _start:
     mov  si, offset msg_ok
     call print16
     jmp  0x0000:0x8000
-
 .disk_err:
     mov  si, offset msg_err
     call print16
@@ -165,6 +132,7 @@ print16:
 
 .align 2
 drive_save:  .byte 0
+blk:         .word 0
 dap:
     .byte 0x10, 0x00
 dap_count:   .word 0

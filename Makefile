@@ -57,6 +57,12 @@ KERNEL_C_OBJS = \
     kernel/usb_hid.o   \
     kernel/usb.o       \
     kernel/gfx.o       \
+    kernel/inflate.o   \
+    kernel/image.o     \
+    kernel/png.o       \
+    kernel/jpeg.o      \
+    kernel/bmp.o       \
+    kernel/tga_pcx_qoi.o \
     kernel/sound.o     \
     kernel/resilience.o \
     kernel/net.o       \
@@ -91,8 +97,9 @@ KERNEL_OBJS = $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS)
 # wrong is silent and nasty: the code still runs, but every statically
 # initialised variable reads back as zero.
 KERNEL_LOAD_ADDR = 0x8000
-KERNEL_BLOCKS    = 5
-KERNEL_LOAD_MAX  = 640             # sectors, must match boot/boot.S
+KERNEL_BLOCKS    = 8
+KERNEL_LOAD_MAX  = 1024            # sectors, must match boot/boot.S
+CFLAGS += -DKERNEL_LOAD_SECTORS=$(KERNEL_LOAD_MAX)
 
 boot/boot.o: boot/boot.S
 	$(AS) --32 -o $@ $<
