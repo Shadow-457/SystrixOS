@@ -65,13 +65,33 @@ static u64 fb_detect_lfb_phys(void) {
 #define VBE_MODE_1024x768x24     0x011A
 #define VBE_MODE_1024x768x32     0x011B
 
-/* Default resolution — can be changed at runtime via fb_set_resolution() */
+/* Colour depth — always 32bpp so a pixel is one u32. */
 #define FB_BPP     32
+/* The LFB is mapped for the largest mode we may ever select, so a
+ * runtime resolution change never needs a re-map. */
 #define FB_MAX_WIDTH  1920
 #define FB_MAX_HEIGHT 1080
+#define FB_MAP_BYTES  ((usize)FB_MAX_WIDTH * FB_MAX_HEIGHT * 4)
 
-static int  fb_width  = 1920;   /* current width  */
-static int  fb_height = 1080;   /* current height */
+/* Candidate modes, most preferred first.
+ *
+ * QEMU's bochs-display refuses any xres/yres larger than the ones it
+ * was configured with (the `xres=`/`yres=` arguments on the command
+ * line) — there is no way to ask it for a bigger mode.  So instead of
+ * hard-coding one resolution and giving up when it is rejected, we
+ * offer a preference list and keep the first the hardware accepts.
+ * `make run` uses 1024x768, which is why that one is first. */
+static const int fb_modes[][2] = {
+    { 1024,  768 },
+    { 1280,  720 },
+    { 1920, 1080 },
+    {  800,  600 },
+    {  640,  480 },
+};
+#define FB_MODE_COUNT ((int)(sizeof(fb_modes) / sizeof(fb_modes[0])))
+
+static int  fb_width  = 1024;   /* current width  */
+static int  fb_height = 768;    /* current height */
 #define FB_WIDTH   fb_width
 #define FB_HEIGHT  fb_height
 
@@ -91,71 +111,94 @@ static u16 dispi_read(u16 index) {
     return inw(BOCHS_DISPI_IOPORT_DATA);
 }
 
-/* Check if Bochs/VBE dispi interface is available */
+/* Check if Bochs/VBE dispi interface is available.
+ *
+ * The DISPI_ID register is a family of values, not a single constant:
+ *   0xB0C0 Bochs VBE          0xB0C1 Bochs VBE + BGA
+ *   0xB0C2 QEMU std VGA       0xB0C3 QEMU std VGA + BGA
+ *   0xB0C4 QEMU extended      0xB0C5 QEMU extended + BGA (+ more)
+ * Matching only 0xB0C0/0xB0C1 made this fail on every modern QEMU,
+ * which is why the framebuffer never came up. */
 static int dispi_check(void) {
     dispi_write(VBE_INDEX_ID, VBE_DISPI_GETCAPS);
     u16 id = dispi_read(VBE_INDEX_ID);
-    /* Bochs returns 0xB0C0 or 0xB0C1 for VBE ID */
-    return (id == 0xB0C0 || id == 0xB0C1);
+    return (id >= 0xB0C0 && id <= 0xB0CF);
+}
+
+/* Try to program w x h @ 32bpp.  Returns 1 if the hardware accepted it. */
+static int fb_try_mode(int w, int h) {
+    dispi_write(VBE_INDEX_ENABLE, 0);
+
+    dispi_write(VBE_INDEX_XRES, (u16)w);
+    dispi_write(VBE_INDEX_YRES, (u16)h);
+    dispi_write(VBE_INDEX_BPP, FB_BPP);
+
+    /* QEMU clamps (and reads back) whatever it was configured for, so a
+     * mismatch here means "too big" — not "no display". */
+    if (dispi_read(VBE_INDEX_XRES) != (u16)w) return 0;
+    if (dispi_read(VBE_INDEX_YRES) != (u16)h) return 0;
+    if (dispi_read(VBE_INDEX_BPP)    != FB_BPP) return 0;
+
+    dispi_write(VBE_INDEX_ENABLE,
+                VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED | VBE_DISPI_NOCLEARMEM);
+    return (dispi_read(VBE_INDEX_ENABLE) & VBE_DISPI_ENABLED) ? 1 : 0;
 }
 
 /* Enable VBE graphics mode via Bochs dispi interface */
 void fb_enable(void) {
     watchdog_suspend();   /* fb init + page mapping can take >5s on slow QEMU */
-    /* Verify dispi interface is available */
+
+    if (fb_enabled) return;
+
     if (!dispi_check()) {
-        /* Fallback: try to use it anyway (QEMU may still work) */
-    }
-
-    /* Disable first to reset state */
-    dispi_write(VBE_INDEX_ENABLE, 0);
-
-    /* Set resolution and color depth */
-    dispi_write(VBE_INDEX_XRES, (u16)fb_width);
-    dispi_write(VBE_INDEX_YRES, (u16)fb_height);
-    dispi_write(VBE_INDEX_BPP, FB_BPP);
-
-    /* Verify settings were accepted */
-    u16 xres = dispi_read(VBE_INDEX_XRES);
-    u16 yres = dispi_read(VBE_INDEX_YRES);
-    u16 bpp  = dispi_read(VBE_INDEX_BPP);
-
-    if (xres != (u16)fb_width || yres != (u16)fb_height || bpp != FB_BPP) {
-        /* Mode not supported, abort gracefully */
+        /* No Bochs/VBE dispi interface: there is no framebuffer to map. */
+        watchdog_resume();
         return;
     }
 
-    /* Enable VBE with linear framebuffer */
-    dispi_write(VBE_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED | VBE_DISPI_NOCLEARMEM);
-
-    /* Verify mode is active */
-    u16 enabled = dispi_read(VBE_INDEX_ENABLE);
-    if (!(enabled & VBE_DISPI_ENABLED)) {
-        return;  /* Failed to enable */
+    /* Pick the first mode the hardware actually accepts. */
+    int mode_ok = 0;
+    for (int i = 0; i < FB_MODE_COUNT; i++) {
+        if (fb_try_mode(fb_modes[i][0], fb_modes[i][1])) {
+            fb_width  = fb_modes[i][0];
+            fb_height = fb_modes[i][1];
+            mode_ok = 1;
+            break;
+        }
     }
+    if (!mode_ok) { watchdog_resume(); return; }
 
     fb_phys_addr = fb_detect_lfb_phys();
     fb_size = (u64)fb_width * fb_height * (FB_BPP / 8);
 
-    /* Map framebuffer into kernel address space at 0xA0000000 */
+    /* Map the framebuffer into kernel address space at FB_KERNEL_VA.
+     * Map the *maximum* size, not the current mode's size, so that a
+     * later fb_set_resolution() to a larger mode needs no re-map. */
     u64 fb_kernel_va = FB_KERNEL_VA;
-
-    /* Map the framebuffer region identity-mapped for the kernel */
-    for (u64 offset = 0; offset < fb_size; offset += PAGE_SIZE) {
+    for (u64 offset = 0; offset < FB_MAP_BYTES; offset += PAGE_SIZE) {
         u64 phys = fb_phys_addr + offset;
         u64 virt = fb_kernel_va + offset;
-        /* Use PTE_KERNEL_RW (present + writable, no NX) */
         vmm_map(read_cr3(), virt, phys, PTE_KERNEL_RW & ~(1ULL << 63));
     }
 
     /* Memory barrier to ensure mappings are visible */
     __asm__ volatile("" ::: "memory");
 
+    /* Write a sentinel to prove the mapping is actually backed by the
+     * LFB before we advertise the framebuffer as usable. */
     fb_ptr = (u8 *)fb_kernel_va;
+    volatile u32 *probe = (volatile u32 *)fb_kernel_va;
+    *probe = 0xDEADBEAFu;
+    __asm__ volatile("" ::: "memory");
+    if (*probe != 0xDEADBEAFu) { fb_ptr = NULL; watchdog_resume(); return; }
+
     fb_enabled = 1;
 
-    /* Clear screen to dark blue (retro feel) */
-    fb_fill_rect(0, 0, FB_WIDTH, FB_HEIGHT, 0x00003380);
+    /* Clear screen to the desktop base colour */
+    fb_fill_rect(0, 0, FB_WIDTH, FB_HEIGHT, 0x000a0e14u);
+
+    kprintf("[fb] mode %dx%d @32bpp  LFB phys 0x%08x  vbe id 0x%04x\r\n",
+            fb_width, fb_height, (u32)fb_phys_addr, dispi_read(VBE_INDEX_ID));
     watchdog_resume();
 }
 
@@ -209,7 +252,13 @@ void fb_fill_rect(int x, int y, int w, int h, u32 color) {
     }
 }
 
-/* Fast gradient fill: horizontal (left color ca, right color cb) */
+/* Fast gradient fill: horizontal (left color ca, right color cb)
+ *
+ * `t` is the offset of the column *within the rectangle*, i.e. col - x.
+ * Using the absolute column instead (the old `col + (x0 - x)`) made every
+ * gradient that did not start at column 0 sample far off the end of its
+ * own range, which is why gradients turned into unexpected colours
+ * depending on where they were drawn. */
 void fb_fill_gradient_h(int x, int y, int w, int h, u32 ca, u32 cb) {
     if (!fb_enabled || w <= 0 || h <= 0) return;
     if (x >= FB_WIDTH || y >= FB_HEIGHT || x+w <= 0 || y+h <= 0) return;
@@ -222,8 +271,9 @@ void fb_fill_gradient_h(int x, int y, int w, int h, u32 ca, u32 cb) {
     /* Precompute one gradient row, then copy it h times */
     static u32 grad_row[FB_MAX_WIDTH];
     int rw = x1 - x0;
+    if (rw > FB_MAX_WIDTH) rw = FB_MAX_WIDTH;
     for (int col = 0; col < rw; col++) {
-        int gc = col + (x0 - x); /* position in original gradient */
+        int gc = col + (x0 - x);   /* offset within the rect */
         int r = w > 1 ? ar + (br-ar)*gc/(w-1) : ar;
         int g = w > 1 ? ag + (bg-ag)*gc/(w-1) : ag;
         int b = w > 1 ? ab + (bb-ab)*gc/(w-1) : ab;
@@ -247,7 +297,7 @@ void fb_fill_gradient_v(int x, int y, int w, int h, u32 ca, u32 cb) {
     int br=(cb>>16)&0xff, bg=(cb>>8)&0xff, bb=cb&0xff;
     int rw = x1 - x0;
     for (int row = y0; row < y1; row++) {
-        int gr = row + (y0 - y);
+        int gr = row - y;          /* offset within the rect */
         int r = h > 1 ? ar + (br-ar)*gr/(h-1) : ar;
         int g = h > 1 ? ag + (bg-ag)*gr/(h-1) : ag;
         int b = h > 1 ? ab + (bb-ab)*gr/(h-1) : ab;
@@ -467,38 +517,30 @@ u64  fb_get_phys(void)   { return fb_phys_addr; }
  * Returns 1 on success, 0 if the mode was rejected by the hardware.
  */
 int fb_set_resolution(int w, int h) {
+    if (!fb_enabled) return 0;
     if (w <= 0 || h <= 0) return 0;
     if (w > FB_MAX_WIDTH)  w = FB_MAX_WIDTH;
     if (h > FB_MAX_HEIGHT) h = FB_MAX_HEIGHT;
+    if (w == fb_width && h == fb_height) return 1;
 
-    /* Disable, reconfigure, re-enable */
-    dispi_write(VBE_INDEX_ENABLE, 0);
+    int old_w = fb_width, old_h = fb_height;
 
-    dispi_write(VBE_INDEX_XRES, (u16)w);
-    dispi_write(VBE_INDEX_YRES, (u16)h);
-    dispi_write(VBE_INDEX_BPP, FB_BPP);
-
-    u16 xres = dispi_read(VBE_INDEX_XRES);
-    u16 yres = dispi_read(VBE_INDEX_YRES);
-
-    if (xres != (u16)w || yres != (u16)h) {
-        /* Rejected — restore previous mode */
-        dispi_write(VBE_INDEX_XRES, (u16)fb_width);
-        dispi_write(VBE_INDEX_YRES, (u16)fb_height);
-        dispi_write(VBE_INDEX_BPP, FB_BPP);
-        dispi_write(VBE_INDEX_ENABLE,
-                    VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED | VBE_DISPI_NOCLEARMEM);
+    if (!fb_try_mode(w, h)) {
+        /* Rejected by the hardware — put the old mode back. */
+        fb_try_mode(old_w, old_h);
+        fb_width = old_w; fb_height = old_h;
         return 0;
     }
-
-    dispi_write(VBE_INDEX_ENABLE,
-                VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED | VBE_DISPI_NOCLEARMEM);
 
     fb_width  = w;
     fb_height = h;
     fb_size   = (u64)w * h * (FB_BPP / 8);
 
+    /* The gfx double-buffering layer caches page offsets for the old
+     * geometry — tell it to re-derive them. */
+    gfx_invalidate_backbuffer();
+
     /* Clear new viewport */
-    fb_fill_rect(0, 0, w, h, 0x00003380);
+    fb_fill_rect(0, 0, w, h, 0x000a0e14u);
     return 1;
 }

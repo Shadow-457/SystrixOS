@@ -1,9 +1,10 @@
 # ================================================================
-#  SHADOW OS — Stage 1 Bootloader (512 bytes, MBR)
+#  Systrix OS — Stage 1 Bootloader (512 bytes, MBR)
 #
 #  Uses INT 13h AH=42h (LBA extensions) — no 127-sector limit.
-#  Loads 512 sectors (256KB) in four 128-sector reads.
-#  Kernel sits at physical 0x8000.
+#  Five 128-sector reads cover LBA 1..640 (320 KiB) from physical
+#  0x8000.  tools/check_kernel_fit.py enforces that the kernel's
+#  initialised sections stay inside that window.
 # ================================================================
 .code16
 .intel_syntax noprefix
@@ -31,8 +32,32 @@ _start:
     jmp  .disk_err
 
 .do_lba:
-    # LBA read #1: LBA 1..128 -> 0x0000:0x8000 (phys 0x8000..0x17FFF)
-    mov  word ptr [dap_count],  128
+    # ── Load the kernel ────────────────────────────────────────────
+    # 128 sectors (64 KiB) per read, from LBA 1 upwards into physical
+    # 0x8000.  Five reads cover 0x8000..0x57FFF = 320 KiB, comfortably
+    # more than the kernel's initialised footprint; the Makefile fails
+    # the build if it ever outgrows that.
+    #
+    # Loading all of .text, .rodata *and .data* matters.  Stopping after
+    # the first 256 KiB left .data reading back as zeroes, which is
+    # silent: the kernel runs, but every statically initialised variable
+    # (GUI repaint flags, RNG seeds, lookup tables) reads as 0, so
+    # features appear to work while doing nothing.
+    #
+    # The destination segment advances by 0x1000 per read because
+    # 0x1000 * 16 = 0x10000 = 128 sectors * 512 bytes:
+    #   LBA    1..128  ->  0:8000  (phys 0x008000)
+    #   LBA  129..256  -> 1000:8000 (phys 0x018000)
+    #   LBA  257..384  -> 2000:8000 (phys 0x028000)
+    #   LBA  385..512  -> 3000:8000 (phys 0x038000)
+    #   LBA  513..640  -> 4000:8000 (phys 0x048000)
+    #
+    # The MBR lives at 0x7C00 with the stack starting there and growing
+    # down, so the 0x7Cxx variables below are never clobbered by these
+    # transfers (which all begin at 0x8000 or above).
+
+    # --- LBA 1..128 -> 0x0000:0x8000 ---
+    mov  word ptr [dap_count],   128
     mov  word ptr [dap_buf_off], 0x8000
     mov  word ptr [dap_buf_seg], 0x0000
     mov  dword ptr [dap_lba_lo], 1
@@ -43,36 +68,36 @@ _start:
     int  0x13
     jc   .disk_err
 
-    # LBA read #2: LBA 129..256 -> 0x1800:0x0000 (phys 0x18000..0x27FFF)
-    mov  word ptr [dap_count],  128
-    mov  word ptr [dap_buf_off], 0x0000
-    mov  word ptr [dap_buf_seg], 0x1800
+    # --- LBA 129..256 -> 0x1000:0x8000 ---
+    mov  word ptr [dap_buf_seg], 0x1000
     mov  dword ptr [dap_lba_lo], 129
-    mov  dword ptr [dap_lba_hi], 0
     lea  si, [dap]
     mov  ah, 0x42
     mov  dl, byte ptr [drive_save]
     int  0x13
     jc   .disk_err
 
-    # LBA read #3: LBA 257..384 -> 0x2800:0x0000 (phys 0x28000..0x37FFF)
-    mov  word ptr [dap_count],  128
-    mov  word ptr [dap_buf_off], 0x0000
-    mov  word ptr [dap_buf_seg], 0x2800
+    # --- LBA 257..384 -> 0x2000:0x8000 ---
+    mov  word ptr [dap_buf_seg], 0x2000
     mov  dword ptr [dap_lba_lo], 257
-    mov  dword ptr [dap_lba_hi], 0
     lea  si, [dap]
     mov  ah, 0x42
     mov  dl, byte ptr [drive_save]
     int  0x13
     jc   .disk_err
 
-    # LBA read #4: LBA 385..512 -> 0x3800:0x0000 (phys 0x38000..0x47FFF)
-    mov  word ptr [dap_count],  128
-    mov  word ptr [dap_buf_off], 0x0000
-    mov  word ptr [dap_buf_seg], 0x3800
+    # --- LBA 385..512 -> 0x3000:0x8000 ---
+    mov  word ptr [dap_buf_seg], 0x3000
     mov  dword ptr [dap_lba_lo], 385
-    mov  dword ptr [dap_lba_hi], 0
+    lea  si, [dap]
+    mov  ah, 0x42
+    mov  dl, byte ptr [drive_save]
+    int  0x13
+    jc   .disk_err
+
+    # --- LBA 513..640 -> 0x4000:0x8000 ---
+    mov  word ptr [dap_buf_seg], 0x4000
+    mov  dword ptr [dap_lba_lo], 513
     lea  si, [dap]
     mov  ah, 0x42
     mov  dl, byte ptr [drive_save]

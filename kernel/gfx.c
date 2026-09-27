@@ -48,10 +48,15 @@
 #define VBE_INDEX_VIRT_HEIGHT     7
 #define VBE_INDEX_Y_OFFSET        9
 
-#define FB_WIDTH   1024
-#define FB_HEIGHT   768
+/* Screen geometry comes from the framebuffer driver, which negotiates
+ * the mode with the hardware at fb_enable() time.  Hard-coding 1024x768
+ * here used to make the two disagree the moment the mode was anything
+ * else. */
+static int gfx_w(void) { return fb_get_width();  }
+static int gfx_h(void) { return fb_get_height(); }
+#define FB_WIDTH   gfx_w()
+#define FB_HEIGHT  gfx_h()
 #define FB_PAGES      2          /* front + back */
-#define FB_VIRT_H  (FB_HEIGHT * FB_PAGES)   /* 1536 */
 
 static void vbe_write(u16 idx, u16 val) {
     outw(BOCHS_DISPI_IOPORT_INDEX, idx);
@@ -70,9 +75,9 @@ static void vsync_wait(void) {
 
 /* ── Double-buffer state ─────────────────────────────────────── */
 /* back_page_y: Y origin of the page we are currently drawing into.
- * Starts at 768 so first flip shows what was drawn at Y=768.        */
-static int back_page_y  = FB_HEIGHT;   /* 768 = back page  */
-static int front_page_y = 0;           /* 0   = front page */
+ * Starts at the second page so the first flip shows what was drawn.  */
+static int back_page_y  = 0;   /* 0 until db_init() runs  */
+static int front_page_y = 0;
 static int db_initialised = 0;
 
 /* Pointer to start of the back page in kernel VA space */
@@ -87,10 +92,24 @@ static inline u32 *back_buf_ptr(void) {
 static void db_init(void) {
     if (db_initialised) return;
     if (!fb_is_enabled()) return;
-    vbe_write(VBE_INDEX_VIRT_HEIGHT, (u16)FB_VIRT_H);
-    /* Start displaying the front page (Y=0) */
+    int h = fb_get_height();
+    if (h <= 0) return;
+    /* Ask for a virtual framebuffer twice the visible height so the
+     * hardware holds a front and a back page. */
+    vbe_write(VBE_INDEX_VIRT_HEIGHT, (u16)(h * FB_PAGES));
+    /* Start displaying the front page (Y=0) and draw into the back. */
     vbe_write(VBE_INDEX_Y_OFFSET, 0);
+    front_page_y = 0;
+    back_page_y  = h;
     db_initialised = 1;
+}
+
+/* The active resolution changed — forget the cached page geometry so
+ * the next draw re-establishes it. */
+void gfx_invalidate_backbuffer(void) {
+    db_initialised = 0;
+    back_page_y = 0;
+    front_page_y = 0;
 }
 
 /* ── Colorkey ─────────────────────────────────────────────────── */

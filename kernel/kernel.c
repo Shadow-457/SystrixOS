@@ -323,8 +323,53 @@ static void backbuf_advance(void)
         back_buf[buf_next][i] = (u16)(VGA_ATTR << 8) | ' ';
 }
 
+/* ================================================================
+ *  SERIAL DEBUG CONSOLE (COM1, 16550)
+ *
+ *  Every character printed to the VGA text console is mirrored out of
+ *  COM1.  This gives a headless, scriptable boot log:
+ *
+ *      make run-debug     -> writes the log to qemu.log
+ *
+ *  It is also what makes `systrix-remote` / CI smoke tests possible,
+ *  since the text console is not always visible in the GUI mode.
+ * ================================================================ */
+
+#define COM1_BASE 0x3F8
+
+static inline void com_wait_tx(void) {
+    /* LSR bit 5 = transmitter holding register empty */
+    for (volatile int i = 0; i < 100000; i++)
+        if (inb(COM1_BASE + 5) & 0x20) return;
+}
+
+void serial_putc(u8 c)
+{
+    if (c == '\n') serial_putc('\r');
+    com_wait_tx();
+    outb(COM1_BASE, c);
+}
+
+void serial_init(void)
+{
+    outb(COM1_BASE + 1, 0x00);   /* disable interrupts        */
+    outb(COM1_BASE + 3, 0x80);   /* DLAB on  -> divisor latch */
+    outb(COM1_BASE + 0, 0x01);   /* 115200 baud               */
+    outb(COM1_BASE + 1, 0x00);
+    outb(COM1_BASE + 3, 0x03);   /* DLAB off, 8N1             */
+    outb(COM1_BASE + 2, 0xC7);   /* FIFO on, clear, 14b trig  */
+    outb(COM1_BASE + 4, 0x0B);   /* DTR | RTS | OUT2          */
+    serial_putc('\r'); serial_putc('\n');
+    serial_putc('['); serial_putc('S'); serial_putc('y'); serial_putc('s');
+    serial_putc('t'); serial_putc('r'); serial_putc('i'); serial_putc('x');
+    serial_putc(' '); serial_putc('s'); serial_putc('e'); serial_putc('r');
+    serial_putc('i'); serial_putc('a'); serial_putc('l'); serial_putc(']');
+    serial_putc(' ');
+}
+
 void vga_putchar(u8 c)
 {
+    serial_putc(c);
     if (c == '\r') {
         cur_col = 0;
         vga_update_hw_cursor();
@@ -384,6 +429,91 @@ void vga_backspace(void)
 void print_str(const char *s)
 {
     while (*s) vga_putchar((u8)*s++);
+}
+
+/* ------------------------------------------------------------
+ *  kprintf — minimal %-style formatter over the console.
+ *
+ *  Supports: %d %i %u %x %X %s %c %p %% and the ll/l size prefixes.
+ *  Right-aligned in a field of -printf("-8s")-style width.
+ *  Newlines are translated to CRLT automatically by vga_putchar().
+ * ------------------------------------------------------------ */
+static void kput_pad(char c, int n)
+{
+    while (n-- > 0) vga_putchar((u8)c);
+}
+
+static void kput_num(u64 v, int base, int upper, int width, int zero, int neg)
+{
+    static const char *lo = "0123456789abcdef";
+    static const char *up = "0123456789ABCDEF";
+    const char *dig = upper ? up : lo;
+
+    char tmp[24];
+    int  n = 0;
+    if (v == 0) tmp[n++] = '0';
+    while (v) { tmp[n++] = dig[v % (u64)base]; v /= (u64)base; }
+    if (neg) tmp[n++] = '-';
+
+    int pad = width - n;
+    if (zero && !neg) { kput_pad('0', pad); pad = 0; }
+    else kput_pad(' ', pad);
+    while (n--) vga_putchar((u8)tmp[n]);
+}
+
+void kprintf(const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    __builtin_va_start(ap, fmt);
+
+    for (const char *p = fmt; *p; p++) {
+        if (*p != '%') { vga_putchar((u8)*p); continue; }
+
+        p++;
+        int zero = 0, width = 0;
+        if (*p == '0') { zero = 1; p++; }
+        while (*p >= '0' && *p <= '9') { width = width * 10 + (*p - '0'); p++; }
+        int lng = 0;
+        while (*p == 'l') { lng++; p++; }
+        if (*p == 'z') { lng = 2; p++; }
+
+        switch (*p) {
+        case 'd': case 'i': {
+            i64 v = lng >= 2 ? (i64)__builtin_va_arg(ap, i64)
+                             : (i64)__builtin_va_arg(ap, int);
+            int neg = v < 0;
+            u64 m = neg ? (u64)(-v) : (u64)v;
+            kput_num(m, 10, 0, width, zero, neg);
+            break;
+        }
+        case 'u': {
+            u64 v = lng >= 2 ? __builtin_va_arg(ap, u64)
+                             : (u64)__builtin_va_arg(ap, unsigned int);
+            kput_num(v, 10, 0, width, zero, 0);
+            break;
+        }
+        case 'x': case 'X': case 'p': {
+            u64 v = (p == 'p' || lng >= 2) ? (u64)__builtin_va_arg(ap, void *)
+                    : (lng == 1) ? (u64)__builtin_va_arg(ap, unsigned long)
+                                 : (u64)__builtin_va_arg(ap, unsigned int);
+            if (p == 'p') { vga_putchar('0'); vga_putchar('x'); kput_num(v, 16, 0, 16, 1, 0); }
+            else kput_num(v, 16, *p == 'X', width, zero, 0);
+            break;
+        }
+        case 's': {
+            const char *s = __builtin_va_arg(ap, const char *);
+            if (!s) s = "(null)";
+            int n = 0; while (s[n]) n++;
+            kput_pad(' ', width - n);
+            while (*s) vga_putchar((u8)*s++);
+            break;
+        }
+        case 'c': vga_putchar((u8)__builtin_va_arg(ap, int)); break;
+        case '%': vga_putchar('%'); break;
+        default:  vga_putchar('%'); if (*p) vga_putchar((u8)*p); break;
+        }
+    }
+    __builtin_va_end(ap);
 }
 
 void print_hex_byte(u8 v)
@@ -3136,10 +3266,20 @@ static void kbd_init_dummy(void) {}
 
 void kernel_main(void)
 {
+    /* Install the IDT before anything else can fault.
+     *
+     * Until this runs, the IDTR still points at whatever the firmware
+     * left behind, so the very first exception dispatches to a garbage
+     * address and the CPU wanders off with no diagnostic at all.  With
+     * the IDT up front, a fault in any of the init below lands in
+     * isr_errcode(), which prints the error code, RIP and CR2. */
+    scheduler_init();
+
     /* Enable the VGA hardware cursor (scanlines 14–15 = underline style). */
     outb(0x3D4, 0x0A); outb(0x3D5, (inb(0x3D5) & 0xC0) | 14);
     outb(0x3D4, 0x0B); outb(0x3D5, (inb(0x3D5) & 0xE0) | 15);
     vga_clear();
+    serial_init();
 
     /* Initialise kernel subsystems in dependency order. */
     heap_init();
@@ -3227,6 +3367,8 @@ void kernel_main(void)
     kbd_init_dummy();
     mouse_ready = ps2_mouse_ok();
     if (mouse_ready) ps2_mouse_refresh();
+
+    sb16_probe();        /* blocking probe — MUST precede STI */
 
     scheduler_start();   /* STI — timer fires from this point on  */
     usb_full_init();     /* EHCI + XHCI enumeration + mass storage */

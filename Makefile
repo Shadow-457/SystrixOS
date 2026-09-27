@@ -85,6 +85,15 @@ KERNEL_C_OBJS = \
 KERNEL_OBJS = $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS)
 
 # -- Compilation rules ---------------------------------------------
+# Kernel load geometry.  The MBR reads KERNEL_BLOCKS*128 sectors from
+# LBA 1 to physical KERNEL_LOAD_ADDR, so the kernel's initialised image
+# (.text + .rodata + .data) must fit inside that window.  Getting this
+# wrong is silent and nasty: the code still runs, but every statically
+# initialised variable reads back as zero.
+KERNEL_LOAD_ADDR = 0x8000
+KERNEL_BLOCKS    = 5
+KERNEL_LOAD_MAX  = 640             # sectors, must match boot/boot.S
+
 boot/boot.o: boot/boot.S
 	$(AS) --32 -o $@ $<
 
@@ -111,7 +120,8 @@ boot.bin: boot/boot.o
 	@python3 -c "d=open('$@','rb').read(); assert len(d)==512, f'boot.bin is {len(d)} bytes, not 512'; print('boot.bin OK: 512 bytes')"
 
 kernel.bin: $(KERNEL_OBJS) linker.ld
-	$(LD) -m elf_x86_64 -T linker.ld --oformat binary -o $@ $(KERNEL_OBJS)
+	$(LD) -m elf_x86_64 -T linker.ld --oformat binary -Map=kernel.map -o $@ $(KERNEL_OBJS)
+	@python3 tools/check_kernel_fit.py kernel.map $(KERNEL_LOAD_ADDR) $(KERNEL_LOAD_MAX)
 
 # -- FAT32 partition image -----------------------------------------
 fat32.img:

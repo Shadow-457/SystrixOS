@@ -209,17 +209,26 @@ typedef struct {
 
 static MixChannel mix_ch[MIX_CHANNELS];
 static int sb16_ready = 0;
+/* Set once sb16_probe() has run.  Distinguishes "no card" from "not
+ * probed yet" so the IRQ-driven mixer never has to probe. */
+static int sb16_probed = 0;
 
 /* Write a byte to SB16 DSP, spin-wait for ready */
 static void sb16_dsp_write(u8 val) {
-    int t = 100000;
+    int t = 1000;
     while ((inb(SB16_STATUS) & 0x80) && --t) {}
     outb(SB16_WRITE, val);
 }
 
-/* Reset and detect SB16 */
+/* Reset and detect SB16.
+ *
+ * This performs ~100k port reads, so it MUST only ever be called from
+ * a context that can afford to block (boot, or a syscall handler) —
+ * never from the timer IRQ.  See sys_snd_mix_tick(). */
 static int sb16_init(void) {
     if (sb16_ready) return 1;
+    if (sb16_probed) return 0;      /* already know there is no card */
+    sb16_probed = 1;
 
     /* Reset: write 1, wait, write 0 */
     outb(SB16_RESET, 1);
@@ -238,6 +247,15 @@ static int sb16_init(void) {
     /* Turn speaker on */
     sb16_dsp_write(SB16_CMD_SPEAKER_ON);
     return 1;
+}
+
+/* Public: probe the card exactly once, from a blocking context. */
+int sb16_probe(void) {
+    int r = sb16_init();
+    print_str("[SB16] ");
+    print_str(r ? "detected" : "not present");
+    print_str("\r\n");
+    return r;
 }
 
 /* Write one sample to DAC directly */
@@ -288,8 +306,13 @@ i64 sys_snd_mix_volume(u64 ch, u32 vol) {
  *  sys_snd_mix_tick — advance mixer by one PIT tick (~220 samples)
  *  Call from PIT ISR or kernel poll loop once per ~10ms.
  * ================================================================ */
+/* Called from timer_isr 1000×/sec.
+ *
+ * Hard rule: this runs in interrupt context, so it must never probe
+ * for hardware or spin on unbounded port reads.  If no SB16 was found
+ * during boot we simply return. */
 i64 sys_snd_mix_tick(void) {
-    if (!sb16_ready) { sb16_init(); return 0; }
+    if (!sb16_ready) return 0;
 
     for (int s = 0; s < MIX_SAMPLES_PER_TICK; s++) {
         int sum = 0;

@@ -461,7 +461,9 @@ void mem_safety_print_stats(void);
 /* ── resilience.c — SMP, OOM, panic, watchdog ───────────────── */
 void smp_init(void);
 void smp_dispatch(void (*fn)(int cpu_id));
+void smp_set_cmdline(const char *cmdline);
 extern volatile int smp_cores_up;
+extern int smp_enabled;
 extern volatile int smp_total_cpus;
 void oom_kill(void);
 void kernel_panic(const char *reason);
@@ -498,6 +500,10 @@ void scheduler_start(void);
 extern u64 current_pid;
 extern u64 pit_ticks;
 
+/* kernel.c  – serial debug console (COM1) */
+void serial_init(void);
+void serial_putc(u8 c);
+
 /* kernel.c  – VGA */
 void vga_clear(void);
 void vga_putchar(u8 c);
@@ -506,6 +512,8 @@ void vga_scroll_up(void);
 void vga_scroll_down(void);
 void print_str(const char *s);
 void print_hex_byte(u8 v);
+/* printf-style console formatter: %d %i %u %x %X %s %c %p %% (ll/z ok) */
+void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* kernel.c  – ATA */
 void ata_read_sector(u32 lba, void *buf);
@@ -553,6 +561,9 @@ void  fb_enable(void);
 int   fb_set_resolution(int w, int h);   /* switch display res at runtime */
 void  fb_disable(void);
 int   fb_is_enabled(void);
+/* gfx.c — drop the cached double-buffer page geometry.  Call after
+ * fb_set_resolution() so the next draw re-establishes it. */
+void  gfx_invalidate_backbuffer(void);
 void  fb_put_pixel(int x, int y, u32 color);
 u32   fb_get_pixel(int x, int y);
 void  fb_fill_rect(int x, int y, int w, int h, u32 color);
@@ -697,6 +708,9 @@ i64 sys_snd_mix_play(u64 ch, const u8 *samples, u32 len, u32 loop);
 i64 sys_snd_mix_stop(u64 ch);
 i64 sys_snd_mix_volume(u64 ch, u32 vol);
 i64 sys_snd_mix_tick(void);
+/* Blocking one-time SoundBlaster 16 probe. Call from boot/syscall
+ * context only — never from an interrupt handler. */
+int  sb16_probe(void);
 
 /* Syscall numbers */
 #define SYS_SND_OPL_WRITE   320

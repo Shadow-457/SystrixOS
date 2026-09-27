@@ -1538,6 +1538,8 @@ void gui_init(void){
     g_ctx_menu.visible=0;g_launcher.visible=0;g_launcher.anim_progress=100;
     for(int i=0;i<GUI_MAX_WINDOWS;i++){g_wins[i].visible=0;g_wins[i].minimized=0;g_wins[i].maximized=0;g_wins[i].anim_state=WIN_NORMAL;g_wins[i].anim_progress=100;g_wins[i].fade_alpha=255;}
 
+    g_desktop_dirty = 1;
+    g_dock_dirty = 1;
     g_desktop_icon_cnt=0;
     int icon_x=SCR_W-DESKTOP_ICON_W-16,icon_y=MENUBAR_H+16;
     int icon_spacing_y=DESKTOP_ICON_H+8;

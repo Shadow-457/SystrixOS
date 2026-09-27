@@ -1,0 +1,8 @@
+# build artifacts
+*.o
+*.bin
+*.img
+*.map
+qemu.log
+kernel.map
+boot_elf.tmp

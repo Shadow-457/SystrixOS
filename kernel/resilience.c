@@ -67,6 +67,31 @@ static void res_print_hex64(u64 v) {
 volatile int smp_cores_up  = 1;   /* BSP counts as 1 */
 volatile int smp_total_cpus= 1;
 
+/* AP bring-up gate.  Off unless the user boots with 'smp=1'.
+ * See the comment in smp_init() for why this is not the default. */
+int smp_enabled = 0;
+
+/* Kernel command line, e.g. "smp=1 nosmpgui".  NULL when unset. */
+static const char *smp_cmdline = 0;
+
+void smp_set_cmdline(const char *cmdline) { smp_cmdline = cmdline; }
+
+static int cmdline_flag(const char *name) {
+    if (!smp_cmdline) return 0;
+    const char *p = smp_cmdline;
+    while ((p = strchr(p, ' ')) != 0) {
+        p++;
+        while (*p == ' ') p++;
+        if (*p == name[0] && p[1] == '=') {
+            /* flag present: "smp=1" is on, "smp=0" is off */
+            return p[2] != '0';
+        }
+        if (p[0] == name[0] && (p[1] == 0 || p[1] == ' ')) return 1;
+        p--;
+    }
+    return 0;
+}
+
 /* Simple inter-core work dispatch: BSP sets these, AP clears after done */
 void (* volatile smp_work_fn)(int cpu_id) = (void*)0;
 
@@ -175,110 +200,116 @@ static u64 smp_pml4_phys = 0;
 
 static void install_trampoline(void) {
     /* We store key parameters in the trampoline page itself at
-     * fixed offsets after the code, then the code reads them. */
-
-    /* Simple approach: write a small machine-code stub.
-     * Layout at 0x8000:
-     *   [0x00] 16-bit real-mode code
-     *   [0xF0] smp_pml4_phys (8 bytes)
-     *   [0xF8] ap_entry_c address (8 bytes)
-     *   [0xFC] AP stack pointer slot (8 bytes, per-AP filled before SIPI)
+     * fixed offsets after the code, then the code reads them.
+     *
+     * Page layout, relative to SMP_TRAMPOLINE:
+     *   +0x00  16-bit real-mode stub           (SIPI entry point)
+     *   +0x20  32-bit protected-mode stub
+     *   +0x40  64-bit long-mode stub
+     *   +0x60  pseudo-descriptor for the local GDT
+     *   +0x68  GDT entries (null / 32-bit code / 32-bit data)
+     *   +0xF0  smp_pml4_phys   (8 bytes)  - set below
+     *   +0xF8  ap_entry_c      (8 bytes)  - written per AP
+     *   +0xFC  AP stack ptr    (8 bytes)  - written per AP
+     *
+     * NOTE: every absolute address baked into the machine code below
+     * must be SMP_TRAMPOLINE + offset.  Paging is still disabled while
+     * the 16/32-bit stubs run, so linear == physical there and the
+     * physical address is what gets encoded into the instruction.
      */
     u8 *t = (u8*)SMP_TRAMPOLINE;
-    /* Clear trampoline page */
     for (int i = 0; i < 0x1000; i++) t[i] = 0;
 
-    /* Real-mode entry: CLI, set up data seg, jump to protected-mode setup
-     * We use the "inline shellcode" technique — write the bytes directly.
-     * This blob:
-     *   cli
-     *   xor ax,ax; mov ds,ax; mov es,ax; mov ss,ax
-     *   lgdt [cs:0x8060]      (GDT descriptor at offset 0x60)
-     *   mov eax,cr0; or al,1; mov cr0,eax   (PE bit)
-     *   ljmp 0x08:0x8020      (far jump to 32-bit stub at 0x8020)
-     *
-     * 32-bit stub at 0x8020:
-     *   set up selectors; enable PAE; load PML4 (from 0x80F0);
-     *   set EFER.LME; enable paging; ljmp 0x08:ap_entry_c_trampoline
-     *
-     * 64-bit ap_entry_c_trampoline at 0x8040:
-     *   set rsp from 0x80FC; jmp ap_entry_c
-     *
-     * This is complex to hand-assemble correctly here, so instead we
-     * use a well-known minimal trampoline byte sequence for x86-64:
-     */
+    /* Offsets encoded into the stubs, kept next to the bytes so a change
+     * of SMP_TRAMPOLINE cannot silently desynchronise them. */
+    const u32 GDT_DESC = (u32)(SMP_TRAMPOLINE + 0x60);
+    const u32 PM_ENTRY = (u32)(SMP_TRAMPOLINE + 0x20);
+    const u32 LM_ENTRY = (u32)(SMP_TRAMPOLINE + 0x40);
+    const u32 PML4_SLOT = (u32)(SMP_TRAMPOLINE + 0xF0);
+    const u32 ENTRY_SLOT = (u32)(SMP_TRAMPOLINE + 0xF8);
+    const u32 STACK_SLOT = (u32)(SMP_TRAMPOLINE + 0xFC);
 
-    /* --- 16-bit header at 0x8000 --- */
+    /* --- 16-bit real-mode header (SIPI lands here) --- */
     static const u8 tramp16[] = {
-        0xFA,                   /* cli */
-        0x31, 0xC0,             /* xor ax,ax */
-        0x8E, 0xD8,             /* mov ds,ax */
-        0x8E, 0xC0,             /* mov es,ax */
-        0x8E, 0xD0,             /* mov ss,ax */
-        /* lgdt [0x8060] */
-        0x0F, 0x01, 0x16, 0x60, 0x80,
-        /* mov eax,cr0 */
-        0x0F, 0x20, 0xC0,
-        /* or al, 1 (set PE) */
-        0x0C, 0x01,
-        /* mov cr0, eax */
-        0x0F, 0x22, 0xC0,
-        /* ljmp 0x08:0x8020  (far jump: 66 EA lo hi 0x00 seg_lo seg_hi) */
-        0x66, 0xEA,
-        0x20, 0x80, 0x00, 0x00,  /* offset 0x8020 */
-        0x08, 0x00               /* selector 0x08 */
+        0xFA,                       /* cli                         */
+        0x31, 0xC0,                 /* xor ax,ax                   */
+        0x8E, 0xD8,                 /* mov ds,ax                   */
+        0x8E, 0xC0,                 /* mov es,ax                   */
+        0x8E, 0xD0,                 /* mov ss,ax                   */
+        0x0F, 0x01, 0x16, 0, 0,     /* lgdt [GDT_DESC]  (patched)  */
+        0x0F, 0x20, 0xC0,           /* mov eax,cr0                 */
+        0x0C, 0x01,                 /* or  al,1   (set PE)         */
+        0x0F, 0x22, 0xC0,           /* mov cr0,eax                 */
+        0x66, 0xEA, 0, 0, 0, 0,     /* ljmpl PM_ENTRY, sel 0x08    */
+        0x08, 0x00,
     };
     for (usize i = 0; i < sizeof(tramp16); i++) t[i] = tramp16[i];
+    t[9]  = (u8)(GDT_DESC & 0xFF);  t[10] = (u8)((GDT_DESC >> 8) & 0xFF);
+    t[17] = (u8)(PM_ENTRY & 0xFF);  t[18] = (u8)((PM_ENTRY >> 8) & 0xFF);
 
-    /* --- 32-bit PM stub at 0x8020 --- */
-    /* Sets up segments, loads PML4, enables long mode */
+    /* --- 32-bit protected-mode stub --- */
     static const u8 tramp32[] = {
-        /* mov ax,0x10; mov ds,ax; mov es,ax; mov ss,ax */
-        0x66, 0xB8, 0x10, 0x00,
-        0x8E, 0xD8, 0x8E, 0xC0, 0x8E, 0xD0,
-        /* mov eax, cr4; or eax, 0x20 (PAE); mov cr4, eax */
+        0x66, 0xB8, 0x10, 0x00,     /* mov ax,0x10                 */
+        0x8E, 0xD8,                 /* mov ds,ax                   */
+        0x8E, 0xC0,                 /* mov es,ax                   */
+        0x8E, 0xD0,                 /* mov ss,ax                   */
+        /* mov eax,cr4; or eax,0x20 (PAE); mov cr4,eax */
         0x0F, 0x20, 0xE0, 0x83, 0xC8, 0x20, 0x0F, 0x22, 0xE0,
-        /* mov eax, [0x80F0]  (low 32 bits of PML4 phys addr) */
-        0x8B, 0x05, 0xF0, 0x80, 0x00, 0x00,
-        /* mov cr3, eax */
+        /* mov eax,[PML4_SLOT]; mov cr3,eax */
+        0xA1, 0, 0, 0, 0,           /* mov eax, moffs32 (patched)  */
         0x0F, 0x22, 0xD8,
-        /* rdmsr EFER (0xC0000080); or eax,0x100 (LME); wrmsr */
+        /* rdmsr EFER(0xC0000080); or eax,0x100 (LME); wrmsr */
         0xB9, 0x80, 0x00, 0x00, 0xC0,
-        0x0F, 0x32, 0x0D, 0x00, 0x01, 0x00, 0x00, 0x0F, 0x30,
-        /* mov eax,cr0; or eax,0x80000001; mov cr0,eax (PG+PE) */
+        0x0F, 0x32,
+        0x0D, 0x00, 0x01, 0x00, 0x00,
+        0x0F, 0x30,
+        /* mov eax,cr0; or eax,0x80000001 (PG|PE); mov cr0,eax */
         0x0F, 0x20, 0xC0,
         0x0D, 0x01, 0x00, 0x00, 0x80,
         0x0F, 0x22, 0xC0,
-        /* ljmp 0x08:0x8040 (64-bit entry) */
-        0x66, 0xEA, 0x40, 0x80, 0x00, 0x00, 0x08, 0x00
+        0x66, 0xEA, 0, 0, 0, 0,     /* ljmpl LM_ENTRY, sel 0x08    */
+        0x08, 0x00,
     };
     for (usize i = 0; i < sizeof(tramp32); i++) t[0x20 + i] = tramp32[i];
+    t[0x20 + 16] = (u8)(PML4_SLOT & 0xFF);
+    t[0x20 + 17] = (u8)((PML4_SLOT >> 8) & 0xFF);
+    t[0x20 + 18] = (u8)((PML4_SLOT >> 16) & 0xFF);
+    t[0x20 + 19] = (u8)((PML4_SLOT >> 24) & 0xFF);
+    t[0x20 + 45] = (u8)(LM_ENTRY & 0xFF);
+    t[0x20 + 46] = (u8)((LM_ENTRY >> 8) & 0xFF);
 
-    /* --- 64-bit entry at 0x8040 --- */
-    /* mov rsp, [0x80FC]; jmp [0x80F8] (absolute indirect) */
+    /* --- 64-bit long-mode stub ---
+     *   mov rsp, [STACK_SLOT]
+     *   jmp  [ENTRY_SLOT]
+     * REX.W 8B /r with mod=00 rm=100 (SIB) and base=101 (none) is an
+     * absolute disp32, i.e. a linear address.  The BSP's page tables
+     * identity-map the low megabytes so it resolves onto this page. */
     static const u8 tramp64[] = {
-        /* mov rsp, qword [rel 0x80FC] */
-        0x48, 0x8B, 0x24, 0x25, 0xFC, 0x80, 0x00, 0x00,
-        /* jmp qword [rel 0x80F8] */
-        0xFF, 0x24, 0x25, 0xF8, 0x80, 0x00, 0x00,
+        0x48, 0x8B, 0x24, 0x25, 0, 0, 0, 0,   /* mov rsp,[abs32] */
+        0xFF, 0x24, 0x25, 0, 0, 0, 0,         /* jmp  [abs32]   */
     };
     for (usize i = 0; i < sizeof(tramp64); i++) t[0x40 + i] = tramp64[i];
+    t[0x44] = (u8)(STACK_SLOT & 0xFF);
+    t[0x45] = (u8)((STACK_SLOT >> 8) & 0xFF);
+    t[0x46] = (u8)((STACK_SLOT >> 16) & 0xFF);
+    t[0x47] = (u8)((STACK_SLOT >> 24) & 0xFF);
+    t[0x4C] = (u8)(ENTRY_SLOT & 0xFF);
+    t[0x4D] = (u8)((ENTRY_SLOT >> 8) & 0xFF);
+    t[0x4E] = (u8)((ENTRY_SLOT >> 16) & 0xFF);
+    t[0x4F] = (u8)((ENTRY_SLOT >> 24) & 0xFF);
 
-    /* --- Minimal GDT at 0x8060 --- */
-    /* GDT descriptor */
+    /* --- Minimal local GDT --- */
     u16 *gdt_desc = (u16*)(SMP_TRAMPOLINE + 0x60);
-    gdt_desc[0] = 23;                   /* limit = 3 entries × 8 - 1 */
-    *(u32*)(gdt_desc + 1) = (u32)(SMP_TRAMPOLINE + 0x68); /* base */
+    gdt_desc[0] = 23;                                     /* 3 entries */
+    *(u32*)(gdt_desc + 1) = (u32)(SMP_TRAMPOLINE + 0x68);
 
-    /* GDT entries at 0x8068 */
     u64 *gdt = (u64*)(SMP_TRAMPOLINE + 0x68);
-    gdt[0] = 0;                          /* null descriptor */
-    gdt[1] = 0x00CF9A000000FFFFULL;      /* 32-bit code, ring 0 */
-    gdt[2] = 0x00CF92000000FFFFULL;      /* 32-bit data, ring 0 */
+    gdt[0] = 0;
+    gdt[1] = 0x00CF9A000000FFFFULL;   /* 32-bit code, ring 0 */
+    gdt[2] = 0x00CF92000000FFFFULL;   /* 32-bit data, ring 0 */
 
-    /* --- Parameters at 0x80F0 --- */
-    *(u64*)(SMP_TRAMPOLINE + 0xF0) = smp_pml4_phys;  /* PML4 physical */
-    /* 0x80F8 = ap_entry_c address, 0x80FC = stack pointer — filled per AP */
+    /* --- Parameter slot: BSP PML4 physical address --- */
+    *(u64*)(SMP_TRAMPOLINE + 0xF0) = smp_pml4_phys;
 }
 
 /* Called by each AP after it reaches long mode */
@@ -306,6 +337,8 @@ void smp_init(void) {
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     smp_pml4_phys = cr3;
 
+    smp_enabled = cmdline_flag("smp");
+
     /* Map the LAPIC MMIO page before any lapic_read/lapic_write.
      * entry.S identity-maps only 0..1 GB (512x2MB huge pages).
      * 0xFEE00000 is outside that range and causes a #PF without
@@ -318,6 +351,18 @@ void smp_init(void) {
 
     if (ap_count == 0) {
         print_str("[SMP] Single-core only (no APs found in MADT)\r\n");
+        return;
+    }
+
+    /* AP bring-up is opt-in.
+     *
+     * A misbehaving AP cannot be recovered from: it shares the IDT, the
+     * page tables and the physical framebuffer with the BSP, so a single
+     * bad trampoline takes the whole machine down with it.  Start with
+     * one core (which is all the scheduler needs today) and let the
+     * user ask for more explicitly. */
+    if (!smp_enabled) {
+        print_str("[SMP] AP bring-up disabled (boot with 'smp=1'); running on 1 core\r\n");
         return;
     }
 
